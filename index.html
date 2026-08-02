@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; media-src 'self' blob: mediastream:; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    /*
+     * Deliberately NO -webkit-app-region: drag here.
+     * On Windows a drag region is hit-tested as the title bar, so right-clicks
+     * never reach the page and the context menu becomes unreachable. Dragging is
+     * done manually via pointer events + IPC instead (see script below).
+     */
+  }
+
+  #container {
+    width: 100%; height: 100%;
+    border-radius: var(--radius, 16px);
+    overflow: hidden;
+    background: #111;
+    position: relative;
+    cursor: move;
+  }
+
+  video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+    /* Mirror so it feels natural (like a mirror) */
+    transform: scaleX(-1);
+    /* Also rounded here, not just clipped by #container: a transformed child
+       gets its own compositing layer and can bleed past overflow:hidden. */
+    border-radius: var(--radius, 16px);
+  }
+
+  #error {
+    display: none;
+    position: absolute; inset: 0;
+    align-items: center; justify-content: center;
+    color: #ff6b6b; font-family: sans-serif; font-size: 13px;
+    text-align: center; padding: 16px;
+    background: #111;
+    border-radius: var(--radius, 16px);
+  }
+
+  /* Resize grip in the bottom-right corner */
+  #grip {
+    position: absolute;
+    right: 0; bottom: 0;
+    width: 20px; height: 20px;
+    cursor: se-resize;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #grip::after {
+    content: '';
+    position: absolute;
+    right: 3px; bottom: 3px;
+    width: 8px; height: 8px;
+    border-right: 2px solid rgba(255,255,255,0.5);
+    border-bottom: 2px solid rgba(255,255,255,0.5);
+    pointer-events: none;
+  }
+  #container:hover #grip { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="error">No camera found.</div>
+  <div id="grip" title="Drag to resize"></div>
+</div>
+
+<script>
+(() => {
+  const video     = document.getElementById('video');
+  const error     = document.getElementById('error');
+  const grip      = document.getElementById('grip');
+  const container = document.getElementById('container');
+
+  // ---- Corner radius ----------------------------------------------------
+  function applyRadius(px) {
+    const n = Number(px);
+    document.documentElement.style.setProperty(
+      '--radius', (Number.isFinite(n) ? Math.max(0, n) : 16) + 'px'
+    );
+  }
+
+  // Live updates from the menu's "Corner radius" submenu and from config.json edits
+  window.api.onCornerRadius(applyRadius);
+
+  // ---- Webcam ------------------------------------------------------------
+  async function startCamera(deviceId) {
+    try {
+      const constraints = deviceId
+        ? { video: { deviceId: { exact: deviceId } }, audio: false }
+        : { video: true, audio: false };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      error.style.display = 'none';
+      video.style.display = 'block';
+    } catch (e) {
+      video.style.display = 'none';
+      error.style.display = 'flex';
+      error.textContent = `Camera error: ${e.message}`;
+    }
+  }
+
+  // ---- Move / resize ----------------------------------------------------
+  // Absolute offsets from the grab point, so the window can't drift.
+  let drag = null;   // { kind: 'move' | 'resize', sx, sy, id }
+
+  container.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;                    // left button only
+    const kind = (e.target === grip) ? 'resize' : 'move';
+    drag = { kind, sx: e.screenX, sy: e.screenY, id: e.pointerId };
+    if (kind === 'resize') window.api.resizeStart();
+    else                   window.api.moveStart();
+    // Capture keeps pointermove coming even when the cursor outruns the window.
+    container.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  container.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.screenX - drag.sx;
+    const dy = e.screenY - drag.sy;
+    if (drag.kind === 'resize') window.api.resizeBy(dx, dy);
+    else                        window.api.moveBy(dx, dy);
+  });
+
+  function endDrag(e) {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    drag = null;
+    window.api.dragEnd();
+  }
+  container.addEventListener('pointerup',     endDrag);
+  container.addEventListener('pointercancel', endDrag);
+
+  // ---- Right-click menu -------------------------------------------------
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    // Cancel any drag started by a chorded click so the window can't stick.
+    if (drag) endDrag();
+    window.api.showContextMenu();
+  });
+
+  // ---- Async startup ----------------------------------------------------
+  // Deliberately LAST. getUserMedia can take a few seconds, and awaiting it
+  // before wiring the listeners above left right-click (and dragging) dead
+  // until the camera came up — the menu looked broken on every cold start.
+  (async () => {
+    try {
+      const cfg = await window.api.getConfig();
+      applyRadius(cfg.corner_radius);
+    } catch (_) {}
+    await startCamera();
+  })();
+})();
+</script>
+</body>
+</html>

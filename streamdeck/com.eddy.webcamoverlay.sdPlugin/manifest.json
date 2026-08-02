@@ -1,0 +1,114 @@
+{
+  "UUID": "com.eddy.webcamoverlay",
+  "Name": "Webcam Overlay",
+  "Version": "1.1.0.0",
+  "Author": "Eddy",
+  "Description": "Control the floating webcam overlay — show, hide, maximize, window mode, opacity and corner radius. Each button lights up while the overlay is in that state.",
+  "Category": "Webcam Overlay",
+  "CategoryIcon": "imgs/plugin/category",
+  "Icon": "imgs/plugin/icon",
+  "CodePath": "bin/plugin.js",
+  "PropertyInspectorPath": "ui/port.html",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.5"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Actions": [
+    {
+      "UUID": "com.eddy.webcamoverlay.show",
+      "Name": "Show",
+      "Tooltip": "Show the overlay. Lit while the overlay is visible.",
+      "Icon": "imgs/actions/show/icon",
+      "Controllers": ["Keypad"],
+      "DisableAutomaticStates": true,
+      "States": [
+        { "Image": "imgs/actions/show/off", "TitleAlignment": "bottom" },
+        { "Image": "imgs/actions/show/on", "TitleAlignment": "bottom" }
+      ]
+    },
+    {
+      "UUID": "com.eddy.webcamoverlay.hide",
+      "Name": "Hide",
+      "Tooltip": "Hide the overlay. Lit while the overlay is hidden.",
+      "Icon": "imgs/actions/hide/icon",
+      "Controllers": ["Keypad"],
+      "DisableAutomaticStates": true,
+      "States": [
+        { "Image": "imgs/actions/hide/off", "TitleAlignment": "bottom" },
+        { "Image": "imgs/actions/hide/on", "TitleAlignment": "bottom" }
+      ]
+    },
+    {
+      "UUID": "com.eddy.webcamoverlay.maximize",
+      "Name": "Maximize",
+      "Tooltip": "Maximize the overlay. Lit while the overlay is maximized.",
+      "Icon": "imgs/actions/maximize/icon",
+      "Controllers": ["Keypad"],
+      "DisableAutomaticStates": true,
+      "States": [
+        { "Image": "imgs/actions/maximize/off", "TitleAlignment": "bottom" },
+        { "Image": "imgs/actions/maximize/on", "TitleAlignment": "bottom" }
+      ]
+    },
+    {
+      "UUID": "com.eddy.webcamoverlay.window",
+      "Name": "Window Mode",
+      "Tooltip": "Return the overlay to window mode. Lit while the overlay is windowed.",
+      "Icon": "imgs/actions/window/icon",
+      "Controllers": ["Keypad"],
+      "DisableAutomaticStates": true,
+      "States": [
+        { "Image": "imgs/actions/window/off", "TitleAlignment": "bottom" },
+        { "Image": "imgs/actions/window/on", "TitleAlignment": "bottom" }
+      ]
+    },
+    {
+      "UUID": "com.eddy.webcamoverlay.opacity",
+      "Name": "Opacity",
+      "Tooltip": "Rotate to adjust overlay opacity; press to reset to 100%",
+      "Icon": "imgs/actions/opacity/icon",
+      "Controllers": ["Keypad", "Encoder"],
+      "States": [
+        { "Image": "imgs/actions/opacity/key", "TitleAlignment": "bottom" }
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/opacity/encoder",
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Adjust opacity",
+          "Push": "Reset to 100%",
+          "Touch": "Reset to 100%"
+        }
+      }
+    },
+    {
+      "UUID": "com.eddy.webcamoverlay.radius",
+      "Name": "Corner Radius",
+      "Tooltip": "Rotate to adjust corner radius; press to reset to 16 px",
+      "Icon": "imgs/actions/radius/icon",
+      "Controllers": ["Keypad", "Encoder"],
+      "States": [
+        { "Image": "imgs/actions/radius/key", "TitleAlignment": "bottom" }
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/radius/encoder",
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Adjust corner radius",
+          "Push": "Reset to 16 px",
+          "Touch": "Reset to 16 px"
+        }
+      }
+    }
+  ]
+}

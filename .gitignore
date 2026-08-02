@@ -1,0 +1,17 @@
+# Dependencies — restore with `npm install` (see README)
+node_modules/
+
+# Per-machine runtime state. main.js recreates this with defaults on first run,
+# and it holds this machine's window position/size, so it should not be shared.
+/config.json
+
+# Stream Deck plugin runtime logs
+logs/
+*.log
+
+# Editor / OS cruft
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,12 @@
+{
+  "name": "webcam-overlay",
+  "version": "1.0.0",
+  "description": "Floating borderless always-on-top webcam window",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}
