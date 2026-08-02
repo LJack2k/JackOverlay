@@ -68,16 +68,38 @@ function Draw-Slash($g, [System.Drawing.Color]$c) {
   $pen.Dispose()
 }
 
-function Draw-Mode($g, [bool]$max, [System.Drawing.Color]$frame, [System.Drawing.Color]$fill) {
+# Screen outline filled edge to edge.
+function Draw-Maximize($g, [System.Drawing.Color]$frame, [System.Drawing.Color]$fill) {
   $pen = New-Object System.Drawing.Pen $frame, 4
   $outline = New-RoundedPath 6 12 60 44 5
   $g.DrawPath($pen, $outline)
   $outline.Dispose(); $pen.Dispose()
 
   $brush = New-Object System.Drawing.SolidBrush $fill
-  $inner = if ($max) { New-RoundedPath 12 18 48 32 3 } else { New-RoundedPath 38 34 22 16 3 }
+  $inner = New-RoundedPath 12 18 48 32 3
   $g.FillPath($brush, $inner)
   $inner.Dispose(); $brush.Dispose()
+}
+
+# The familiar "restore down" glyph: two offset windows, front one over the back.
+# Deliberately NOT a screen outline with a small box inside it — that reads as a
+# corner preset, which is what this used to be confused with.
+function Draw-Restore($g, [System.Drawing.Color]$frame, [System.Drawing.Color]$fill) {
+  $pen = New-Object System.Drawing.Pen $frame, 4
+  $back = New-RoundedPath 32 12 28 28 4
+  $g.DrawPath($pen, $back)
+  $back.Dispose(); $pen.Dispose()
+
+  # Knock a gap out of the back window so the two read as separate panes. The key
+  # background is dark, so painting $Dark here is the same trick as the camera lens.
+  $gap = New-RoundedPath 12 24 36 36 6
+  $g.FillPath((New-Object System.Drawing.SolidBrush $Dark), $gap)
+  $gap.Dispose()
+
+  $brush = New-Object System.Drawing.SolidBrush $fill
+  $front = New-RoundedPath 16 28 28 28 4
+  $g.FillPath($brush, $front)
+  $front.Dispose(); $brush.Dispose()
 }
 
 # Screen outline with a small window parked in one corner of it.
@@ -160,14 +182,14 @@ $icons = @(
   @{ rel = 'imgs/actions/hide/off';  size = 72; draw = { param($g) Draw-Camera $g $DimGlyph; Draw-Slash $g $DimRed } },
 
   # Maximize - lit while maximized
-  @{ rel = 'imgs/actions/maximize/icon'; size = 20; draw = { param($g) Draw-Mode $g $true $FrameOn  $Accent } },
-  @{ rel = 'imgs/actions/maximize/on';   size = 72; draw = { param($g) Draw-Mode $g $true $FrameOn  $Accent } },
-  @{ rel = 'imgs/actions/maximize/off';  size = 72; draw = { param($g) Draw-Mode $g $true $FrameOff $DimGlyph } },
+  @{ rel = 'imgs/actions/maximize/icon'; size = 20; draw = { param($g) Draw-Maximize $g $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/maximize/on';   size = 72; draw = { param($g) Draw-Maximize $g $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/maximize/off';  size = 72; draw = { param($g) Draw-Maximize $g $FrameOff $DimGlyph } },
 
   # Window mode - lit while windowed
-  @{ rel = 'imgs/actions/window/icon'; size = 20; draw = { param($g) Draw-Mode $g $false $FrameOn  $Accent } },
-  @{ rel = 'imgs/actions/window/on';   size = 72; draw = { param($g) Draw-Mode $g $false $FrameOn  $Accent } },
-  @{ rel = 'imgs/actions/window/off';  size = 72; draw = { param($g) Draw-Mode $g $false $FrameOff $DimGlyph } },
+  @{ rel = 'imgs/actions/window/icon'; size = 20; draw = { param($g) Draw-Restore $g $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/window/on';   size = 72; draw = { param($g) Draw-Restore $g $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/window/off';  size = 72; draw = { param($g) Draw-Restore $g $FrameOff $DimGlyph } },
 
   # Screen-corner presets - lit while the overlay is parked in that corner
   @{ rel = 'imgs/actions/topleft/icon';     size = 20; draw = { param($g) Draw-Corner $g 'top' 'left' $FrameOn  $Accent } },
