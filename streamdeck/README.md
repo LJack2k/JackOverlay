@@ -78,6 +78,12 @@ project) and the plugin is a client of it.
 
 One JSON object per line, both directions.
 
+**Targeting.** The overlay supports multiple windows, so most commands accept an
+`overlay` field holding an overlay `id`. Omit it and the command hits the **primary**
+(first) overlay; pass `"*"` and it hits every one. That default is why this plugin
+still works unchanged — its buttons currently drive the primary overlay only.
+Per-overlay targeting from the Stream Deck is not wired up yet.
+
 Commands the plugin sends:
 
 | `cmd` | Extra | Effect |
@@ -92,8 +98,13 @@ Commands the plugin sends:
 | `snapCorner` | `corner` | Park in `top-left` / `top-right` / `bottom-left` / `bottom-right` |
 | `setStartup` | `enabled` | Launch the overlay at Windows login |
 | `setCamera` | `id` or `label` | Switch webcam. `label` matches case-insensitively on a substring, which is far more usable than an opaque device id; no argument means the system default |
+| `setMirror` / `toggleMirror` | `enabled` | Flip the image left-to-right |
+| `setFit` | `fit` | `cover` / `contain` / `fill` |
+| `fitToCamera` | — | Resize the window to the stream's aspect ratio |
 | `openSettings` | — | Open the settings window |
-| `quit` | — | Quit the overlay |
+| `addOverlay` | — | Create another overlay window |
+| `removeOverlay` | `overlay` | Close one and drop it from the config (the last one can't be removed) |
+| `quit` | — | Quit the app |
 
 Out-of-range values are clamped by the overlay, and unknown verbs are ignored
 rather than throwing — the plugin can't wedge the overlay with a bad message.
@@ -108,12 +119,22 @@ The overlay pushes this on connect and after every change:
   "opacity": 1,
   "radius": 16,
   "corner": "bottom-right",
-  "startup": true
+  "startup": true,
+  "overlays": [
+    { "id": "main", "name": "Main", "mode": "windowed", "visible": true,
+      "opacity": 1, "radius": 16, "mirror": false, "fit": "cover",
+      "corner": "bottom-right", "camera": "Insta360 Link 2 Pro",
+      "video": { "width": 1920, "height": 1080 } }
+  ]
 }
 ```
 
-`corner` is the screen corner the window is currently parked in, or `null` when it
-sits anywhere else — computed from the live bounds, so dragging the window off a
+`overlays` is the authoritative per-window list. The five fields beside it mirror
+the **primary** overlay so that controllers written before multi-overlay support
+keep reading the shape they expect.
+
+`corner` is the screen corner a window is currently parked in, or `null` when it
+sits anywhere else — computed from the live bounds, so dragging a window off a
 corner clears it.
 
 Pushes are coalesced (20 ms) because one action often touches several setters —

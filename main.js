@@ -10,7 +10,7 @@ const { spawn, execFileSync } = require('child_process');
 const { startControlServer } = require('./control-server');
 
 // ---------------------------------------------------------------------------
-// Config
+// Constants
 // ---------------------------------------------------------------------------
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -27,69 +27,116 @@ const CORNERS = {
   'bottom-right': 'Bottom right'
 };
 
-// Slack when deciding which corner the window is parked in, so a corner still
+// Slack when deciding which corner a window is parked in, so a corner still
 // reads as "current" after a rounding pass through setBounds.
 const CORNER_TOLERANCE = 2;
+
+const MIN_OPACITY = 0.1;    // below this a window is invisible AND unclickable
+const MAX_RADIUS  = 200;
+
+const FITS = {
+  cover:   'Fill & crop',
+  contain: 'Fit whole image',
+  fill:    'Stretch'
+};
+
+// Registry value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
+const STARTUP_NAME = 'Webcam Overlay';
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+function defaultOverlay(id, name) {
+  return {
+    id,
+    name,
+    window: { x: null, y: null, width: 320, height: 240, opacity: 0.95 },
+    corner_radius: 16,
+    // Mirror the image left-to-right. Natural for a face cam, wrong for a camera
+    // pointed at anything else (text reads backwards), so it defaults to off.
+    mirror: false,
+    // How the image fills the window: 'cover' crops to fill, 'contain' shows the
+    // whole frame letterboxed, 'fill' stretches (and distorts).
+    fit: 'cover',
+    // The id selects the device; the label is kept so the right camera can be
+    // found again if Chromium reissues device ids.
+    camera_id:    null,
+    camera_label: null
+  };
+}
 
 const DEFAULT_CONFIG = {
   hotkeys: {
     toggle_visibility: 'CommandOrControl+Alt+W',
     toggle_maximize:   'CommandOrControl+Alt+M'
   },
-  window: {
-    x:       null,
-    y:       null,
-    width:   320,
-    height:  240,
-    opacity: 0.95
-  },
-  corner_radius: 16,
-  // Gap left between the window and the screen edge when snapping to a corner.
+  // Gap left between a window and the screen edge when snapping to a corner.
   corner_margin: 24,
-  // Chosen webcam. The id is what actually selects the device; the label is kept
-  // so the right camera can be found again if Chromium reissues device ids.
-  camera_id: null,
-  camera_label: null,
-  // Command or absolute path used by "Edit config.json".
+  // Command or absolute path used by "Open config.json".
   // null = auto-detect (VS Code, then Notepad++, then Notepad).
   editor: null,
-  // Loopback port the Stream Deck plugin (or any other controller) talks to.
-  // 0 disables the control server entirely.
-  control_port: 28492
+  // Loopback port external controllers talk to. 0 disables the control server.
+  control_port: 28492,
+  overlays: [defaultOverlay('main', 'Main')]
 };
-
-const MIN_OPACITY = 0.1;    // below this the window is invisible AND unclickable
-const MAX_RADIUS  = 200;
-
-// Registry value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
-const STARTUP_NAME = 'Webcam Overlay';
-const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 
 // Text of the last config we wrote ourselves, so the file watcher can tell our
 // own saves apart from a real external edit.
 let lastWrittenConfig = null;
 
-function fillDefaults(cfg) {
+/**
+ * Brings a pre-multi-overlay config forward. Before this, a single overlay's
+ * settings lived at the top level; they are now the first entry of `overlays`.
+ */
+function migrateConfig(raw) {
+  if (Array.isArray(raw.overlays) && raw.overlays.length) return raw;
+
+  const first = defaultOverlay('main', 'Main');
+  if (raw.window)                     first.window        = { ...first.window, ...raw.window };
+  if (raw.corner_radius !== undefined) first.corner_radius = raw.corner_radius;
+  if (raw.camera_id     !== undefined) first.camera_id     = raw.camera_id;
+  if (raw.camera_label  !== undefined) first.camera_label  = raw.camera_label;
+
+  raw.overlays = [first];
+  delete raw.window;
+  delete raw.corner_radius;
+  delete raw.camera_id;
+  delete raw.camera_label;
+  return raw;
+}
+
+function fillDefaults(cfgIn) {
   for (const [k, v] of Object.entries(DEFAULT_CONFIG)) {
-    if (!(k in cfg)) { cfg[k] = v; continue; }
-    if (typeof v === 'object' && v !== null) {
+    if (k === 'overlays') continue;
+    if (!(k in cfgIn)) { cfgIn[k] = v; continue; }
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
       for (const [kk, vv] of Object.entries(v)) {
-        if (!(kk in cfg[k])) cfg[k][kk] = vv;
+        if (!(kk in cfgIn[k])) cfgIn[k][kk] = vv;
       }
     }
   }
-  return cfg;
+
+  if (!Array.isArray(cfgIn.overlays) || !cfgIn.overlays.length) {
+    cfgIn.overlays = [defaultOverlay('main', 'Main')];
+  }
+  cfgIn.overlays = cfgIn.overlays.map((o, i) => {
+    const base = defaultOverlay(o.id || `overlay-${i + 1}`, o.name || `Overlay ${i + 1}`);
+    return { ...base, ...o, window: { ...base.window, ...(o.window || {}) } };
+  });
+  return cfgIn;
 }
 
 function loadConfig() {
   if (fs.existsSync(CONFIG_PATH)) {
     try {
-      return fillDefaults(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
+      return fillDefaults(migrateConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))));
     } catch (_) { /* fall through to defaults */ }
   }
-  const cfg = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-  saveConfig(cfg);
-  return cfg;
+  const fresh = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  saveConfig(fresh);
+  return fresh;
 }
 
 function saveConfig(c) {
@@ -105,7 +152,6 @@ function saveConfig(c) {
 // ---------------------------------------------------------------------------
 
 function makeTrayIcon() {
-  // Pre-generated base64 PNG (16×16 RGBA blue circle)
   const b64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAN0lEQVR4nGNgoAnY8v8/VkyRZqIMIaQZryHEasZqCKmaMQwZNYAKBlAcjVRJSMQaQhSgSDOJAABJ26SIN6ER1AAAAABJRU5ErkJggg==';
   return nativeImage.createFromDataURL(`data:image/png;base64,${b64}`);
 }
@@ -114,56 +160,44 @@ function makeTrayIcon() {
 // App state
 // ---------------------------------------------------------------------------
 
-let win  = null;
-let tray = null;
 let cfg  = null;
-
-// 'windowed' | 'maximized'. Always starts windowed so a maximized quit can never
-// leave the app stuck filling the screen on next launch.
-let mode = 'windowed';
-
-// Bounds to return to when leaving maximized mode.
-let windowedBounds = null;
-
-// Start bounds for an in-progress renderer-driven move/resize.
-let dragOrigin = null;
-
-// Settings window, and the data it renders.
+let tray = null;
+let control = null;
 let settingsWin = null;
 
-// Video inputs, as reported by the overlay renderer. Enumerated there rather than
-// here because device *labels* are only exposed to a context that has been granted
-// camera permission, and the overlay is the context that asked for it.
+// id -> { id, win, mode, windowedBounds, dragOrigin }
+const overlays = new Map();
+
+// Video inputs, as reported by an overlay renderer. Enumerated there rather than
+// here because device *labels* are only exposed to a context that has been
+// granted camera permission, and the overlays are the contexts that asked.
 let cameras = [];
 
 // Which hotkeys actually registered, so the settings screen can say so.
 let hotkeyStatus = {};
 
-// ---------------------------------------------------------------------------
-// Bounds persistence
-// ---------------------------------------------------------------------------
+function confOf(ov)      { return cfg.overlays.find((o) => o.id === ov.id); }
+function liveOverlays()  { return cfg.overlays.map((o) => overlays.get(o.id)).filter(Boolean); }
+function primaryOverlay() { return liveOverlays()[0] || null; }
 
-function saveBounds() {
-  if (!win || win.isDestroyed() || mode !== 'windowed') return;
-  const b = win.getBounds();
-  cfg.window.x      = b.x;
-  cfg.window.y      = b.y;
-  cfg.window.width  = b.width;
-  cfg.window.height = b.height;
-  saveConfig(cfg);
-  // Moving or resizing can take the window out of a corner, so controllers need
-  // to hear about it too — otherwise a corner button stays lit after a drag.
-  broadcastState();
+/** Which overlay a renderer IPC message came from. */
+function overlayFor(event) {
+  for (const ov of overlays.values()) {
+    if (ov.win && !ov.win.isDestroyed() && ov.win.webContents === event.sender) return ov;
+  }
+  return null;
 }
 
-// ---------------------------------------------------------------------------
-// Corner radius
-// ---------------------------------------------------------------------------
-
-function applyCornerRadius() {
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('corner-radius', cfg.corner_radius);
-  }
+/**
+ * Resolves a control-channel / settings target. Omitted means the primary
+ * overlay, so controllers written before multi-overlay support keep working;
+ * "*" means every overlay.
+ */
+function targets(id) {
+  if (id === '*') return liveOverlays();
+  if (!id) return [primaryOverlay()].filter(Boolean);
+  const ov = overlays.get(id);
+  return ov ? [ov] : [];
 }
 
 function clamp(n, lo, hi) {
@@ -172,39 +206,168 @@ function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
 
-function setCornerRadius(px) {
-  cfg.corner_radius = Math.round(clamp(px, 0, MAX_RADIUS));
+// ---------------------------------------------------------------------------
+// Bounds persistence
+// ---------------------------------------------------------------------------
+
+function saveBounds(ov) {
+  if (!ov || !ov.win || ov.win.isDestroyed() || ov.mode !== 'windowed') return;
+  const conf = confOf(ov);
+  if (!conf) return;
+  const b = ov.win.getBounds();
+  conf.window.x = b.x;
+  conf.window.y = b.y;
+  conf.window.width  = b.width;
+  conf.window.height = b.height;
   saveConfig(cfg);
-  applyCornerRadius();
+  // Moving or resizing can take a window out of a corner, so controllers need to
+  // hear about it too — otherwise a corner button stays lit after a drag.
   broadcastState();
 }
 
-function setOpacity(value) {
-  const v = Math.round(clamp(value, MIN_OPACITY, 1) * 100) / 100;
-  win.setOpacity(v);
-  cfg.window.opacity = v;
-  saveConfig(cfg);
-  broadcastState();
-}
+// ---------------------------------------------------------------------------
+// Corner radius / opacity
+// ---------------------------------------------------------------------------
 
-function radiusItems() {
-  const items = RADIUS_PRESETS.map(px => ({
-    label:   px === 0 ? 'Square (0 px)' : `${px} px`,
-    type:    'radio',
-    checked: cfg.corner_radius === px,
-    click:   () => setCornerRadius(px)
-  }));
-
-  // A hand-edited config.json can hold any value; show it rather than leaving
-  // the submenu looking like nothing is selected.
-  if (!RADIUS_PRESETS.includes(cfg.corner_radius)) {
-    items.push(
-      { type: 'separator' },
-      { label: `Custom: ${cfg.corner_radius} px  (from config.json)`,
-        type: 'radio', checked: true, enabled: false }
-    );
+function applyCornerRadius(ov) {
+  if (ov.win && !ov.win.isDestroyed()) {
+    ov.win.webContents.send('corner-radius', confOf(ov).corner_radius);
   }
-  return items;
+}
+
+function applyMirror(ov) {
+  if (ov.win && !ov.win.isDestroyed()) {
+    ov.win.webContents.send('mirror', !!confOf(ov).mirror);
+  }
+}
+
+function setMirror(ov, on) {
+  confOf(ov).mirror = !!on;
+  saveConfig(cfg);
+  applyMirror(ov);
+  broadcastState();
+}
+
+function applyFit(ov) {
+  if (ov.win && !ov.win.isDestroyed()) {
+    ov.win.webContents.send('fit', confOf(ov).fit);
+  }
+}
+
+function setFit(ov, fit) {
+  if (!(fit in FITS)) return;
+  confOf(ov).fit = fit;
+  saveConfig(cfg);
+  applyFit(ov);
+  broadcastState();
+}
+
+/**
+ * Resizes the window to the camera's own aspect ratio, keeping the current width.
+ * This is the real fix for a source whose shape doesn't match the window — with
+ * 'cover' the mismatch shows up as heavy cropping, with 'contain' as letterboxing.
+ */
+function fitWindowToCamera(ov) {
+  const v = ov.video;
+  if (!v || !v.width || !v.height) return false;
+  if (ov.mode === 'maximized') windowModeWindow(ov);
+
+  const b = ov.win.getBounds();
+  const height = Math.round(clamp(b.width * (v.height / v.width), MIN_H, 4096));
+  ov.win.setBounds({ x: b.x, y: b.y, width: b.width, height });
+  saveBounds(ov);
+  return true;
+}
+
+function setCornerRadius(ov, px) {
+  confOf(ov).corner_radius = Math.round(clamp(px, 0, MAX_RADIUS));
+  saveConfig(cfg);
+  applyCornerRadius(ov);
+  broadcastState();
+}
+
+function setOpacity(ov, value) {
+  const v = Math.round(clamp(value, MIN_OPACITY, 1) * 100) / 100;
+  ov.win.setOpacity(v);
+  confOf(ov).window.opacity = v;
+  saveConfig(cfg);
+  broadcastState();
+}
+
+// ---------------------------------------------------------------------------
+// Camera selection
+// ---------------------------------------------------------------------------
+
+function setCamera(ov, id, label) {
+  const conf = confOf(ov);
+  conf.camera_id    = id    || null;
+  conf.camera_label = label || null;
+  saveConfig(cfg);
+  if (ov.win && !ov.win.isDestroyed()) ov.win.webContents.send('set-camera', conf.camera_id);
+  pushSettings();
+  broadcastState();
+}
+
+// Control-channel picker. Accepts a device id, or a case-insensitive substring
+// of the label — ids are opaque hashes, so a label is far more usable from a
+// script. No argument means the system default.
+function selectCamera(ov, msg) {
+  if (msg.id) {
+    const byId = cameras.find((c) => c.deviceId === msg.id);
+    if (byId) setCamera(ov, byId.deviceId, byId.label);
+    return;
+  }
+  if (msg.label) {
+    const needle = String(msg.label).toLowerCase();
+    const byLabel = cameras.find((c) => (c.label || '').toLowerCase().includes(needle));
+    if (byLabel) setCamera(ov, byLabel.deviceId, byLabel.label);
+    return;
+  }
+  setCamera(ov, null, null);
+}
+
+// ---------------------------------------------------------------------------
+// Start with Windows (global, not per overlay)
+// ---------------------------------------------------------------------------
+
+function startupTarget() {
+  // Unpackaged, process.execPath is electron.exe itself. Launching that with no
+  // arguments opens Electron's default welcome window instead of this app, so
+  // the app directory has to be passed explicitly.
+  //
+  // `name` is the registry value under HKCU\...\Run. Without it an unpackaged
+  // app registers as "electron.app.Electron", which is meaningless in Task
+  // Manager's Startup tab and liable to collide with other Electron apps.
+  const target = { name: STARTUP_NAME };
+  return app.isPackaged
+    ? { ...target, path: process.execPath, args: [] }
+    : { ...target, path: process.execPath, args: [app.getAppPath()] };
+}
+
+function startsWithWindows() {
+  if (process.platform !== 'win32') {
+    try { return app.getLoginItemSettings().openAtLogin; } catch (_) { return false; }
+  }
+  // setLoginItemSettings() accepts a `name` for the registry value, but
+  // LoginItemSettingsOptions — what getLoginItemSettings() takes — has no such
+  // field, so it would look for the default "electron.app.Electron" instead and
+  // always report false. Read back the value we actually wrote.
+  try {
+    execFileSync('reg', ['query', RUN_KEY, '/v', STARTUP_NAME],
+                 { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    return true;
+  } catch (_) {
+    return false;   // reg exits non-zero when the value does not exist
+  }
+}
+
+function setStartWithWindows(enabled) {
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled, ...startupTarget() });
+    console.log(`Start with Windows: ${startsWithWindows() ? 'on' : 'off'}`);
+  } catch (e) {
+    console.error(`Could not change the startup setting: ${e.message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,12 +380,12 @@ function which(cmd) {
   try {
     const lines = execFileSync('where', [cmd], {
       stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true
-    }).toString().trim().split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    }).toString().trim().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     if (!lines.length) return null;
     // `where code` lists BOTH `bin\code` (an extensionless shell script) and
     // `bin\code.cmd`. Only the latter can be launched on Windows, and `where`
     // returns the unusable one first — so pick by extension, not by order.
-    return lines.find(l => /\.(exe|cmd|bat|com)$/i.test(l)) || lines[0];
+    return lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l)) || lines[0];
   } catch (_) { return null; }
 }
 
@@ -259,7 +422,6 @@ function fallbackOpen(editor, why) {
 
 function openConfigInEditor() {
   const editor = resolveEditor();
-
   // Anything that isn't a plain .exe — a .cmd shim, or an extensionless shell
   // script like VS Code's bin\code — cannot be handed to CreateProcess directly
   // and has to go through the shell.
@@ -278,57 +440,316 @@ function openConfigInEditor() {
 
   // spawn() reports a missing executable asynchronously via 'error', so a
   // try/catch on its own would silently do nothing at all.
-  child.on('error', e => fallbackOpen(editor, e.message));
+  child.on('error', (e) => fallbackOpen(editor, e.message));
   child.unref();
   console.log(`config.json opened in: ${editor}`);
 }
 
 // ---------------------------------------------------------------------------
-// Start with Windows
+// Window modes
 // ---------------------------------------------------------------------------
 
-// Windows stores this in HKCU\...\CurrentVersion\Run, so the OS is the source of
-// truth — deliberately not mirrored into config.json, which would let the two
-// disagree the moment someone edits the registry or the startup entry directly.
-function startupTarget() {
-  // Unpackaged, process.execPath is electron.exe itself. Launching that with no
-  // arguments opens Electron's default welcome window instead of this app, so the
-  // app directory has to be passed explicitly.
-  //
-  // `name` is the registry value under HKCU\...\Run. Without it an unpackaged app
-  // registers as "electron.app.Electron", which is both meaningless in Task
-  // Manager's Startup tab and liable to collide with any other unpackaged
-  // Electron app doing the same thing.
-  const target = { name: STARTUP_NAME };
-  return app.isPackaged
-    ? { ...target, path: process.execPath, args: [] }
-    : { ...target, path: process.execPath, args: [app.getAppPath()] };
+function showWindow(ov) {
+  ov.win.show();
+  ov.win.focus();
+  broadcastState();
 }
 
-function startsWithWindows() {
-  if (process.platform !== 'win32') {
-    try { return app.getLoginItemSettings().openAtLogin; } catch (_) { return false; }
+function maximizeWindow(ov) {
+  if (ov.mode !== 'maximized') {
+    ov.windowedBounds = ov.win.getBounds();
+    // Set mode BEFORE setBounds so saveBounds() can never persist maximized bounds.
+    ov.mode = 'maximized';
+    // workArea, not bounds: keeps the taskbar — and therefore the tray icon —
+    // reachable while maximized.
+    const { workArea } = screen.getDisplayMatching(ov.windowedBounds);
+    ov.win.setBounds(workArea);
   }
-  // setLoginItemSettings() accepts a `name` for the registry value, but
-  // LoginItemSettingsOptions — what getLoginItemSettings() takes — has no such
-  // field, so it would go looking for the default "electron.app.Electron"
-  // instead and always report false. Read back the value we actually wrote.
-  try {
-    execFileSync('reg', ['query', RUN_KEY, '/v', STARTUP_NAME],
-                 { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-    return true;
-  } catch (_) {
-    return false;   // reg exits non-zero when the value does not exist
-  }
+  showWindow(ov);
 }
 
-function setStartWithWindows(enabled) {
-  try {
-    app.setLoginItemSettings({ openAtLogin: !!enabled, ...startupTarget() });
-    console.log(`Start with Windows: ${startsWithWindows() ? 'on' : 'off'}`);
-  } catch (e) {
-    console.error(`Could not change the startup setting: ${e.message}`);
+function windowModeWindow(ov) {
+  ov.mode = 'windowed';
+  const conf = confOf(ov);
+  const b = ov.windowedBounds;
+  if (b) {
+    ov.win.setBounds(b);
+  } else if (conf.window.x != null && conf.window.y != null) {
+    ov.win.setBounds({
+      x: conf.window.x, y: conf.window.y,
+      width: conf.window.width, height: conf.window.height
+    });
+  } else {
+    ov.win.setSize(conf.window.width, conf.window.height);
   }
+  showWindow(ov);
+  saveBounds(ov);
+}
+
+// skipTaskbar:true means a real minimize() would leave no taskbar button to
+// click, so hide() is the recoverable equivalent — the tray icon and the
+// show/hide hotkey both bring it back.
+function minimizeWindow(ov) {
+  ov.win.hide();
+  broadcastState();
+}
+
+function toggleMaximize(ov) {
+  if (ov.mode === 'maximized') windowModeWindow(ov);
+  else maximizeWindow(ov);
+}
+
+function toggleVisibility(ov) {
+  if (ov.win.isVisible()) minimizeWindow(ov);
+  else showWindow(ov);
+}
+
+// ---------------------------------------------------------------------------
+// Screen-corner presets
+// ---------------------------------------------------------------------------
+
+// Where a window would sit if parked in `corner` on the display it's on now.
+// workArea, not bounds, so it never lands under the taskbar.
+function cornerOrigin(corner, bounds) {
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const m = cfg.corner_margin;
+  return {
+    x: corner.endsWith('left')
+      ? workArea.x + m
+      : workArea.x + workArea.width - bounds.width - m,
+    y: corner.startsWith('top')
+      ? workArea.y + m
+      : workArea.y + workArea.height - bounds.height - m
+  };
+}
+
+function snapToCorner(ov, corner) {
+  if (!(corner in CORNERS)) return;
+
+  // A maximized window has no corner to speak of, so drop back to windowed
+  // first rather than silently doing nothing.
+  if (ov.mode === 'maximized') windowModeWindow(ov);
+
+  const b = ov.win.getBounds();
+  const { x, y } = cornerOrigin(corner, b);
+  ov.win.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
+  showWindow(ov);
+  saveBounds(ov);
+}
+
+// Which corner a window is parked in, or null if it's somewhere else.
+function currentCorner(ov) {
+  if (!ov || !ov.win || ov.win.isDestroyed() || ov.mode !== 'windowed') return null;
+  const b = ov.win.getBounds();
+  for (const corner of Object.keys(CORNERS)) {
+    const { x, y } = cornerOrigin(corner, b);
+    if (Math.abs(b.x - x) <= CORNER_TOLERANCE && Math.abs(b.y - y) <= CORNER_TOLERANCE) {
+      return corner;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Overlay lifecycle
+// ---------------------------------------------------------------------------
+
+function buildWindow(conf) {
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const w = conf.window.width;
+  const h = conf.window.height;
+  const x = conf.window.x ?? sw - w - 24;
+  const y = conf.window.y ?? sh - h - 24;
+
+  const win = new BrowserWindow({
+    x, y, width: w, height: h,
+    minWidth: MIN_W, minHeight: MIN_H,
+    frame:       false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable:   true,
+    hasShadow:   false,
+    webPreferences: {
+      preload:          path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration:  false
+    }
+  });
+
+  win.setAlwaysOnTop(true, 'floating');
+  win.setOpacity(conf.window.opacity);
+  win.loadFile('index.html');
+  return win;
+}
+
+function createOverlay(conf) {
+  const ov = {
+    id: conf.id,
+    win: buildWindow(conf),
+    // Always starts windowed so a maximized quit can never leave an overlay
+    // stuck filling the screen on next launch.
+    mode: 'windowed',
+    windowedBounds: null,
+    dragOrigin: null
+  };
+
+  ov.windowedBounds = ov.win.getBounds();
+  ov.win.webContents.on('did-finish-load', () => {
+    applyCornerRadius(ov);
+    applyMirror(ov);
+    applyFit(ov);
+  });
+
+  // Native edge-resize still fires these; renderer-driven move/resize saves on
+  // its own drag-end. Programmatic setBounds() does not fire either event.
+  let moveTimer = null;
+  ov.win.on('moved',   () => { clearTimeout(moveTimer); moveTimer = setTimeout(() => saveBounds(ov), 300); });
+  ov.win.on('resized', () => saveBounds(ov));
+
+  overlays.set(ov.id, ov);
+  return ov;
+}
+
+function addOverlay() {
+  // Unique id that survives removals in the middle of the list.
+  let n = cfg.overlays.length + 1;
+  while (cfg.overlays.some((o) => o.id === `overlay-${n}`)) n++;
+
+  const conf = defaultOverlay(`overlay-${n}`, `Overlay ${n}`);
+  const from = primaryOverlay();
+  if (from) {
+    // Cascade off the existing one so the new window isn't hidden underneath it.
+    const b = from.win.getBounds();
+    const { workArea } = screen.getDisplayMatching(b);
+    conf.window.width  = b.width;
+    conf.window.height = b.height;
+    conf.window.x = clamp(b.x - b.width - cfg.corner_margin,
+                          workArea.x, workArea.x + workArea.width  - b.width);
+    conf.window.y = clamp(b.y, workArea.y, workArea.y + workArea.height - b.height);
+  }
+
+  cfg.overlays.push(conf);
+  saveConfig(cfg);
+  createOverlay(conf);
+  pushSettings();
+  broadcastState();
+  console.log(`Added overlay "${conf.name}" (${conf.id})`);
+  return conf.id;
+}
+
+function removeOverlay(id) {
+  // Keep at least one, otherwise there is nothing left for the hotkeys to act on
+  // and the app becomes a tray icon with no purpose.
+  if (cfg.overlays.length <= 1) return false;
+
+  const ov = overlays.get(id);
+  if (!ov) return false;
+
+  overlays.delete(id);
+  cfg.overlays = cfg.overlays.filter((o) => o.id !== id);
+  saveConfig(cfg);
+  if (ov.win && !ov.win.isDestroyed()) ov.win.destroy();
+  pushSettings();
+  broadcastState();
+  console.log(`Removed overlay ${id}`);
+  return true;
+}
+
+function renameOverlay(id, name) {
+  const conf = cfg.overlays.find((o) => o.id === id);
+  if (!conf) return;
+  conf.name = String(name || '').trim() || conf.id;
+  saveConfig(cfg);
+  pushSettings();
+  broadcastState();
+}
+
+// ---------------------------------------------------------------------------
+// Control channel
+// ---------------------------------------------------------------------------
+
+let stateTimer = null;
+
+function overlayState(ov) {
+  const conf = confOf(ov);
+  return {
+    id:      ov.id,
+    name:    conf.name,
+    mode:    ov.mode,
+    visible: !!ov.win && !ov.win.isDestroyed() && ov.win.isVisible(),
+    opacity: ov.win && !ov.win.isDestroyed() ? Math.round(ov.win.getOpacity() * 100) / 100 : 1,
+    radius:  conf.corner_radius,
+    mirror:  !!conf.mirror,
+    fit:     conf.fit,
+    corner:  currentCorner(ov),
+    camera:  conf.camera_label,
+    // Intrinsic size of the live stream, once the renderer has reported it.
+    video:   ov.video || null
+  };
+}
+
+function currentState() {
+  const list = liveOverlays().map(overlayState);
+  // The primary overlay's fields stay at the top level so controllers written
+  // before multi-overlay support keep working unchanged.
+  const first = list[0] || { mode: 'windowed', visible: false, opacity: 1, radius: 0, corner: null };
+  return {
+    mode:    first.mode,
+    visible: first.visible,
+    opacity: first.opacity,
+    radius:  first.radius,
+    corner:  first.corner,
+    startup: startsWithWindows(),
+    overlays: list
+  };
+}
+
+// Coalesced: one action often touches several setters (maximize also shows), and
+// controllers only care about the settled result.
+function broadcastState() {
+  clearTimeout(stateTimer);
+  stateTimer = setTimeout(() => {
+    if (control) control.broadcast({ event: 'state', ...currentState() });
+    pushSettings();
+  }, 20);
+}
+
+function handleControlCommand(msg) {
+  const cmd = String(msg && msg.cmd);
+
+  // Overlay-independent verbs first.
+  switch (cmd) {
+    case 'getState':     broadcastState(); return;
+    case 'setStartup':   setStartWithWindows(msg.enabled); broadcastState(); return;
+    case 'openSettings': openSettings();   return;
+    case 'addOverlay':   addOverlay();     return;
+    case 'removeOverlay': removeOverlay(String(msg.overlay || '')); return;
+    case 'quit':         app.quit();       return;
+  }
+
+  for (const ov of targets(msg.overlay)) {
+    switch (cmd) {
+      case 'show':             showWindow(ov);        break;
+      case 'hide':             minimizeWindow(ov);    break;
+      case 'toggleVisibility': toggleVisibility(ov);  break;
+      case 'maximize':         maximizeWindow(ov);    break;
+      case 'windowMode':       windowModeWindow(ov);  break;
+      case 'toggleMaximize':   toggleMaximize(ov);    break;
+      case 'setOpacity':       setOpacity(ov, msg.value); break;
+      case 'nudgeOpacity':     setOpacity(ov, ov.win.getOpacity() + Number(msg.delta || 0)); break;
+      case 'setRadius':        setCornerRadius(ov, msg.value); break;
+      case 'nudgeRadius':      setCornerRadius(ov, confOf(ov).corner_radius + Number(msg.delta || 0)); break;
+      case 'snapCorner':       snapToCorner(ov, String(msg.corner)); break;
+      case 'setCamera':        selectCamera(ov, msg); break;
+      case 'setMirror':        setMirror(ov, msg.enabled); break;
+      case 'toggleMirror':     setMirror(ov, !confOf(ov).mirror); break;
+      case 'setFit':           setFit(ov, String(msg.fit)); break;
+      case 'fitToCamera':      fitWindowToCamera(ov); break;
+      default:                 return;                // unknown verb: ignore
+    }
+  }
+  broadcastState();
 }
 
 // ---------------------------------------------------------------------------
@@ -352,212 +773,45 @@ function reloadConfigFromDisk() {
   try { next = JSON.parse(text); } catch (_) { return; }   // mid-save / invalid JSON
 
   const prevHotkeys = JSON.stringify(cfg.hotkeys);
-  cfg = fillDefaults(next);
+  cfg = fillDefaults(migrateConfig(next));
   cachedEditor = undefined;                    // cfg.editor may have changed
 
-  win.setOpacity(cfg.window.opacity);
-  applyCornerRadius();
-  win.webContents.send('set-camera', cfg.camera_id);
+  // Add or drop windows so the running set matches the file.
+  for (const conf of cfg.overlays) {
+    if (!overlays.has(conf.id)) createOverlay(conf);
+  }
+  for (const id of [...overlays.keys()]) {
+    if (!cfg.overlays.some((o) => o.id === id)) {
+      const ov = overlays.get(id);
+      overlays.delete(id);
+      if (ov.win && !ov.win.isDestroyed()) ov.win.destroy();
+    }
+  }
+
+  for (const ov of liveOverlays()) {
+    const conf = confOf(ov);
+    ov.win.setOpacity(conf.window.opacity);
+    applyCornerRadius(ov);
+    applyMirror(ov);
+    applyFit(ov);
+    ov.win.webContents.send('set-camera', conf.camera_id);
+    if (ov.mode === 'windowed' && conf.window.x != null && conf.window.y != null) {
+      ov.win.setBounds({
+        x: conf.window.x, y: conf.window.y,
+        width:  Math.max(MIN_W, conf.window.width),
+        height: Math.max(MIN_H, conf.window.height)
+      });
+      ov.windowedBounds = ov.win.getBounds();
+    }
+  }
 
   if (JSON.stringify(cfg.hotkeys) !== prevHotkeys) {
     globalShortcut.unregisterAll();
     registerHotkeys();
   }
-  if (mode === 'windowed' && cfg.window.x != null && cfg.window.y != null) {
-    win.setBounds({
-      x: cfg.window.x, y: cfg.window.y,
-      width: Math.max(MIN_W, cfg.window.width),
-      height: Math.max(MIN_H, cfg.window.height)
-    });
-    windowedBounds = win.getBounds();
-  }
+
   broadcastState();
   console.log('config.json reloaded.');
-}
-
-// ---------------------------------------------------------------------------
-// Control channel (Stream Deck plugin, or anything else that speaks the protocol)
-// ---------------------------------------------------------------------------
-
-let control    = null;
-let stateTimer = null;
-
-function currentState() {
-  return {
-    mode:    mode,                                   // 'windowed' | 'maximized'
-    visible: !!win && !win.isDestroyed() && win.isVisible(),
-    opacity: win && !win.isDestroyed() ? Math.round(win.getOpacity() * 100) / 100 : 1,
-    radius:  cfg.corner_radius,
-    corner:  currentCorner(),                        // corner key, or null
-    startup: startsWithWindows()
-  };
-}
-
-// Coalesced: one mutation often touches several setters (maximize also shows),
-// and controllers only care about the settled result.
-function broadcastState() {
-  clearTimeout(stateTimer);
-  stateTimer = setTimeout(() => {
-    if (control) control.broadcast({ event: 'state', ...currentState() });
-    pushSettings();
-  }, 20);
-}
-
-function handleControlCommand(msg) {
-  switch (String(msg && msg.cmd)) {
-    case 'getState':         break;                  // the broadcast below answers it
-    case 'show':             showWindow();           break;
-    case 'hide':             minimizeWindow();       break;
-    case 'toggleVisibility': toggleVisibility();     break;
-    case 'maximize':         maximizeWindow();       break;
-    case 'windowMode':       windowModeWindow();     break;
-    case 'toggleMaximize':   toggleMaximize();       break;
-    case 'setOpacity':       setOpacity(msg.value);  break;
-    case 'nudgeOpacity':     setOpacity(win.getOpacity() + Number(msg.delta || 0)); break;
-    case 'setRadius':        setCornerRadius(msg.value); break;
-    case 'nudgeRadius':      setCornerRadius(cfg.corner_radius + Number(msg.delta || 0)); break;
-    case 'snapCorner':       snapToCorner(String(msg.corner)); break;
-    case 'setStartup':       setStartWithWindows(msg.enabled); break;
-    case 'openSettings':     openSettings();         break;
-    case 'setCamera':        selectCamera(msg);      break;
-    case 'quit':             app.quit();             return;
-    default:                 return;                 // unknown verb: ignore
-  }
-  broadcastState();
-}
-
-// ---------------------------------------------------------------------------
-// Window modes
-// ---------------------------------------------------------------------------
-
-function showWindow() {
-  win.show();
-  win.focus();
-  broadcastState();
-}
-
-function maximizeWindow() {
-  if (mode !== 'maximized') {
-    windowedBounds = win.getBounds();
-    // Set mode BEFORE setBounds so saveBounds() can never persist maximized bounds.
-    mode = 'maximized';
-    // workArea, not bounds: keeps the taskbar — and therefore the tray icon —
-    // reachable while maximized.
-    const { workArea } = screen.getDisplayMatching(windowedBounds);
-    win.setBounds(workArea);
-  }
-  showWindow();
-}
-
-function windowModeWindow() {
-  mode = 'windowed';
-  const b = windowedBounds;
-  if (b) {
-    win.setBounds(b);
-  } else if (cfg.window.x != null && cfg.window.y != null) {
-    win.setBounds({
-      x: cfg.window.x, y: cfg.window.y,
-      width: cfg.window.width, height: cfg.window.height
-    });
-  } else {
-    win.setSize(cfg.window.width, cfg.window.height);
-  }
-  showWindow();
-  saveBounds();
-}
-
-// skipTaskbar:true means a real minimize() would leave no taskbar button to click,
-// so hide() is the recoverable equivalent — the tray icon and the show/hide hotkey
-// both bring it back.
-function minimizeWindow() {
-  win.hide();
-  broadcastState();
-}
-
-// ---------------------------------------------------------------------------
-// Screen-corner presets
-// ---------------------------------------------------------------------------
-
-// Where the window would sit if parked in `corner` on the display it's on now.
-// workArea, not bounds, so the window never lands under the taskbar.
-function cornerOrigin(corner, bounds) {
-  const { workArea } = screen.getDisplayMatching(bounds);
-  const m = cfg.corner_margin;
-  return {
-    x: corner.endsWith('left')
-      ? workArea.x + m
-      : workArea.x + workArea.width - bounds.width - m,
-    y: corner.startsWith('top')
-      ? workArea.y + m
-      : workArea.y + workArea.height - bounds.height - m
-  };
-}
-
-function snapToCorner(corner) {
-  if (!(corner in CORNERS)) return;
-
-  // A maximized window has no corner to speak of, so drop back to windowed
-  // first rather than silently doing nothing.
-  if (mode === 'maximized') windowModeWindow();
-
-  const b = win.getBounds();
-  const { x, y } = cornerOrigin(corner, b);
-  win.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
-  showWindow();
-  saveBounds();
-}
-
-// Which corner the window is currently parked in, or null if it's somewhere else.
-function currentCorner() {
-  if (!win || win.isDestroyed() || mode !== 'windowed') return null;
-  const b = win.getBounds();
-  for (const corner of Object.keys(CORNERS)) {
-    const { x, y } = cornerOrigin(corner, b);
-    if (Math.abs(b.x - x) <= CORNER_TOLERANCE && Math.abs(b.y - y) <= CORNER_TOLERANCE) {
-      return corner;
-    }
-  }
-  return null;
-}
-
-function toggleMaximize() {
-  if (mode === 'maximized') windowModeWindow();
-  else maximizeWindow();
-}
-
-function toggleVisibility() {
-  if (win.isVisible()) minimizeWindow();
-  else showWindow();
-}
-
-// ---------------------------------------------------------------------------
-// Camera selection
-// ---------------------------------------------------------------------------
-
-// Control-channel camera picker. Accepts a device id, or a case-insensitive
-// substring of the label — ids are opaque hashes, so a label is far more usable
-// from a script or a Stream Deck button. No argument means the system default.
-function selectCamera(msg) {
-  if (msg.id) {
-    const byId = cameras.find((c) => c.deviceId === msg.id);
-    if (byId) setCamera(byId.deviceId, byId.label);
-    return;
-  }
-  if (msg.label) {
-    const needle = String(msg.label).toLowerCase();
-    const byLabel = cameras.find((c) => (c.label || '').toLowerCase().includes(needle));
-    if (byLabel) setCamera(byLabel.deviceId, byLabel.label);
-    return;
-  }
-  setCamera(null, null);
-}
-
-function setCamera(id, label) {
-  cfg.camera_id    = id    || null;
-  cfg.camera_label = label || null;
-  saveConfig(cfg);
-  if (win && !win.isDestroyed()) win.webContents.send('set-camera', cfg.camera_id);
-  pushSettings();
 }
 
 // ---------------------------------------------------------------------------
@@ -572,9 +826,10 @@ function settingsSnapshot() {
     hotkeyOk:   hotkeyStatus,
     configPath: CONFIG_PATH,
     editor:     resolveEditor(),
-    bounds:     win && !win.isDestroyed() ? win.getBounds() : null,
-    corner:     currentCorner(),
-    mode
+    overlays:   liveOverlays().map((ov) => ({
+      ...overlayState(ov),
+      bounds: ov.win.getBounds()
+    }))
   };
 }
 
@@ -592,13 +847,13 @@ function openSettings() {
   }
 
   settingsWin = new BrowserWindow({
-    width: 580, height: 880,
-    minWidth: 460, minHeight: 460,
+    width: 600, height: 880,
+    minWidth: 480, minHeight: 460,
     title: 'Webcam Overlay — Settings',
     backgroundColor: '#1e2126',
     autoHideMenuBar: true,
-    // The overlay is alwaysOnTop; without this the settings window would open
-    // behind it and look like nothing happened.
+    // The overlays are alwaysOnTop; without this the settings window would open
+    // behind them and look like nothing happened.
     alwaysOnTop: true,
     webPreferences: {
       preload:          path.join(__dirname, 'settings-preload.js'),
@@ -613,46 +868,29 @@ function openSettings() {
 }
 
 /**
- * Applies a partial settings change from the settings window. Everything routes
- * through the same setters the menus use, so there is one code path per setting
- * and the two interfaces cannot drift apart.
+ * Applies a partial settings change. Everything routes through the same setters
+ * the menus use, so there is one code path per setting and the interfaces cannot
+ * drift apart. `patch.overlay` picks the target; omitted means the primary one.
  */
 function applySettings(patch) {
   if (!patch || typeof patch !== 'object') return;
 
-  if ('opacity'       in patch) setOpacity(patch.opacity);
-  if ('corner_radius' in patch) setCornerRadius(patch.corner_radius);
+  // Global settings
   if ('startup'       in patch) setStartWithWindows(patch.startup);
-  if ('corner'        in patch) snapToCorner(String(patch.corner));
-  if ('camera_id'     in patch) setCamera(patch.camera_id, patch.camera_label);
-
   if ('corner_margin' in patch) {
     cfg.corner_margin = Math.round(clamp(patch.corner_margin, 0, 400));
     saveConfig(cfg);
   }
-
-  if ('width' in patch || 'height' in patch) {
-    const b = win.getBounds();
-    win.setBounds({
-      x: b.x, y: b.y,
-      width:  Math.round(clamp(patch.width  ?? b.width,  MIN_W, 4096)),
-      height: Math.round(clamp(patch.height ?? b.height, MIN_H, 4096))
-    });
-    saveBounds();
-  }
-
   if ('editor' in patch) {
     cfg.editor = patch.editor || null;
     cachedEditor = undefined;              // re-resolve on next use
     saveConfig(cfg);
   }
-
   if ('control_port' in patch) {
     // Bound once at startup, so this one genuinely needs a restart.
     cfg.control_port = Math.round(clamp(patch.control_port, 0, 65535));
     saveConfig(cfg);
   }
-
   if ('hotkeys' in patch) {
     cfg.hotkeys = { ...cfg.hotkeys, ...patch.hotkeys };
     saveConfig(cfg);
@@ -660,61 +898,142 @@ function applySettings(patch) {
     registerHotkeys();
   }
 
+  // Overlay management
+  if (patch.addOverlay)    addOverlay();
+  if (patch.removeOverlay) removeOverlay(String(patch.removeOverlay));
+
+  // Per-overlay settings
+  for (const ov of targets(patch.overlay)) {
+    if ('name'          in patch) renameOverlay(ov.id, patch.name);
+    if ('opacity'       in patch) setOpacity(ov, patch.opacity);
+    if ('corner_radius' in patch) setCornerRadius(ov, patch.corner_radius);
+    if ('mirror'        in patch) setMirror(ov, patch.mirror);
+    if ('fit'           in patch) setFit(ov, String(patch.fit));
+    if (patch.fitToCamera)        fitWindowToCamera(ov);
+    if ('corner'        in patch) snapToCorner(ov, String(patch.corner));
+    if ('camera_id'     in patch) setCamera(ov, patch.camera_id, patch.camera_label);
+    if ('width' in patch || 'height' in patch) {
+      const b = ov.win.getBounds();
+      ov.win.setBounds({
+        x: b.x, y: b.y,
+        width:  Math.round(clamp(patch.width  ?? b.width,  MIN_W, 4096)),
+        height: Math.round(clamp(patch.height ?? b.height, MIN_H, 4096))
+      });
+      saveBounds(ov);
+    }
+  }
+
   broadcastState();
   pushSettings();
 }
 
 // ---------------------------------------------------------------------------
-// Shared menu (used by both the window right-click menu and the tray menu)
+// Menus
 // ---------------------------------------------------------------------------
 
-function opacityItems() {
-  const current = Math.round(win.getOpacity() * 100);
-  return [100, 80, 60, 40].map(pct => ({
+function opacityItems(ov) {
+  const current = Math.round(ov.win.getOpacity() * 100);
+  return [100, 80, 60, 40].map((pct) => ({
     label:   `${pct}%`,
     type:    'radio',
     checked: current === pct,
-    click:   () => setOpacity(pct / 100)
+    click:   () => setOpacity(ov, pct / 100)
   }));
 }
 
-function cornerItems() {
-  const current = currentCorner();
-  const isMax = mode === 'maximized';
+function radiusItems(ov) {
+  const conf = confOf(ov);
+  const items = RADIUS_PRESETS.map((px) => ({
+    label:   px === 0 ? 'Square (0 px)' : `${px} px`,
+    type:    'radio',
+    checked: conf.corner_radius === px,
+    click:   () => setCornerRadius(ov, px)
+  }));
+
+  // A hand-edited config.json can hold any value; show it rather than leaving
+  // the submenu looking like nothing is selected.
+  if (!RADIUS_PRESETS.includes(conf.corner_radius)) {
+    items.push(
+      { type: 'separator' },
+      { label: `Custom: ${conf.corner_radius} px  (from config.json)`,
+        type: 'radio', checked: true, enabled: false }
+    );
+  }
+  return items;
+}
+
+function cornerItems(ov) {
+  const current = currentCorner(ov);
+  const isMax = ov.mode === 'maximized';
   return Object.entries(CORNERS).map(([key, label]) => ({
     label,
     type:    'radio',
     // Nothing is "current" while maximized, so leave them all unchecked rather
     // than implying the window is parked somewhere it isn't.
     checked: !isMax && current === key,
-    click:   () => snapToCorner(key)
+    click:   () => snapToCorner(ov, key)
   }));
 }
 
-function buildMenuTemplate() {
-  const isMax  = mode === 'maximized';
-  const hidden = !win.isVisible();
-  const hkVis  = cfg.hotkeys.toggle_visibility;
-  const hkMax  = cfg.hotkeys.toggle_maximize;
-
+/** The controls for one overlay, used inline in its own menu and nested in the tray. */
+function overlayItems(ov) {
+  const isMax  = ov.mode === 'maximized';
+  const hidden = !ov.win.isVisible();
   const items = [];
 
-  if (hidden) {
-    items.push({ label: 'Show', click: showWindow }, { type: 'separator' });
-  }
+  if (hidden) items.push({ label: 'Show', click: () => showWindow(ov) }, { type: 'separator' });
 
   items.push(
-    { label: 'Maximize',    enabled: !(isMax && !hidden),  click: maximizeWindow },
-    { label: 'Minimize',    enabled: !hidden,              click: minimizeWindow },
-    { label: 'Window mode', enabled: !(!isMax && !hidden), click: windowModeWindow },
+    { label: 'Maximize',    enabled: !(isMax && !hidden),  click: () => maximizeWindow(ov) },
+    { label: 'Minimize',    enabled: !hidden,              click: () => minimizeWindow(ov) },
+    { label: 'Window mode', enabled: !(!isMax && !hidden), click: () => windowModeWindow(ov) },
     { type: 'separator' },
-    { label: 'Move to corner', submenu: cornerItems() },
+    { label: 'Move to corner', submenu: cornerItems(ov) },
     { type: 'separator' },
-    { label: 'Corner radius', submenu: radiusItems() },
-    { label: 'Opacity',       submenu: opacityItems() },
+    { label: 'Corner radius',  submenu: radiusItems(ov) },
+    { label: 'Opacity',        submenu: opacityItems(ov) },
+    {
+      label: 'Image fit',
+      submenu: Object.entries(FITS).map(([key, label]) => ({
+        label,
+        type:    'radio',
+        checked: confOf(ov).fit === key,
+        click:   () => setFit(ov, key)
+      }))
+    },
+    {
+      label:   'Mirror image',
+      type:    'checkbox',
+      checked: !!confOf(ov).mirror,
+      click:   (item) => setMirror(ov, item.checked)
+    },
+    {
+      label: ov.video
+        ? `Fit window to camera  (${ov.video.width}×${ov.video.height})`
+        : 'Fit window to camera',
+      enabled: !!ov.video,
+      click: () => fitWindowToCamera(ov)
+    }
+  );
+  return items;
+}
+
+function buildWindowMenu(ov) {
+  const hkVis = cfg.hotkeys.toggle_visibility;
+  const hkMax = cfg.hotkeys.toggle_maximize;
+
+  return [
+    { label: confOf(ov).name, enabled: false },
+    { type: 'separator' },
+    ...overlayItems(ov),
+    { type: 'separator' },
+    { label: 'Add another overlay', click: () => addOverlay() },
+    { label: 'Remove this overlay',
+      enabled: cfg.overlays.length > 1,
+      click: () => removeOverlay(ov.id) },
     { type: 'separator' },
     { label: `Hotkeys:  ${hkMax} = maximize / window`, enabled: false },
-    { label: `          ${hkVis} = show / hide`,        enabled: false },
+    { label: `          ${hkVis} = show / hide (all)`, enabled: false },
     { type: 'separator' },
     { label: 'Settings…', click: openSettings },
     { type: 'separator' },
@@ -727,54 +1046,31 @@ function buildMenuTemplate() {
     },
     { type: 'separator' },
     { label: 'Exit', click: () => app.quit() }
-  );
-
-  return items;
+  ];
 }
 
-// ---------------------------------------------------------------------------
-// Window
-// ---------------------------------------------------------------------------
+function buildTrayMenu() {
+  const list = liveOverlays();
+  const anyHidden = list.some((ov) => !ov.win.isVisible());
 
-function createWindow() {
-  cfg = loadConfig();
+  const items = [
+    { label: anyHidden ? 'Show all' : 'Hide all',
+      click: () => { for (const ov of list) anyHidden ? showWindow(ov) : minimizeWindow(ov); } },
+    { type: 'separator' }
+  ];
 
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  const w = cfg.window.width;
-  const h = cfg.window.height;
-  const x = cfg.window.x ?? sw - w - 24;
-  const y = cfg.window.y ?? sh - h - 24;
+  for (const ov of list) {
+    items.push({ label: confOf(ov).name, submenu: overlayItems(ov) });
+  }
 
-  win = new BrowserWindow({
-    x, y, width: w, height: h,
-    minWidth: MIN_W, minHeight: MIN_H,
-    frame:       false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable:   true,
-    hasShadow:   false,
-    webPreferences: {
-      preload:          path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration:  false
-    }
-  });
-
-  win.setAlwaysOnTop(true, 'floating');
-  win.setOpacity(cfg.window.opacity);
-  win.loadFile('index.html');
-
-  windowedBounds = win.getBounds();
-
-  // Push the radius once the renderer is actually up.
-  win.webContents.on('did-finish-load', applyCornerRadius);
-
-  // Native edge-resize still fires these; renderer-driven move/resize saves on
-  // its own drag-end. Programmatic setBounds() does not fire either event.
-  let moveTimer = null;
-  win.on('moved',   () => { clearTimeout(moveTimer); moveTimer = setTimeout(saveBounds, 300); });
-  win.on('resized', saveBounds);
+  items.push(
+    { type: 'separator' },
+    { label: 'Add another overlay', click: () => addOverlay() },
+    { label: 'Settings…', click: openSettings },
+    { type: 'separator' },
+    { label: 'Exit', click: () => app.quit() }
+  );
+  return items;
 }
 
 // ---------------------------------------------------------------------------
@@ -783,8 +1079,15 @@ function createWindow() {
 
 function registerHotkeys() {
   const wanted = [
-    ['toggle_visibility', cfg.hotkeys.toggle_visibility, toggleVisibility, 'show / hide'],
-    ['toggle_maximize',   cfg.hotkeys.toggle_maximize,   toggleMaximize,   'maximize / window mode']
+    ['toggle_visibility', cfg.hotkeys.toggle_visibility,
+      // Hiding everything at once is the useful thing; maximizing everything
+      // would just stack windows on top of each other, so that one stays on the
+      // primary overlay.
+      () => { for (const ov of liveOverlays()) toggleVisibility(ov); },
+      'show / hide (all overlays)'],
+    ['toggle_maximize', cfg.hotkeys.toggle_maximize,
+      () => { const ov = primaryOverlay(); if (ov) toggleMaximize(ov); },
+      'maximize / window mode (primary overlay)']
   ];
 
   hotkeyStatus = {};
@@ -817,28 +1120,90 @@ function createTray() {
   tray = new Tray(makeTrayIcon());
   tray.setToolTip('Webcam Overlay');
 
-  tray.on('click', toggleVisibility);
+  tray.on('click', () => {
+    const list = liveOverlays();
+    const anyHidden = list.some((ov) => !ov.win.isVisible());
+    for (const ov of list) anyHidden ? showWindow(ov) : minimizeWindow(ov);
+  });
   tray.on('right-click', () => {
-    tray.popUpContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+    tray.popUpContextMenu(Menu.buildFromTemplate(buildTrayMenu()));
   });
 }
 
 // ---------------------------------------------------------------------------
-// IPC from renderer
+// IPC from renderers
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('show-context-menu', () => {
-  Menu.buildFromTemplate(buildMenuTemplate()).popup({ window: win });
+ipcMain.handle('show-context-menu', (event) => {
+  const ov = overlayFor(event);
+  if (!ov) return;
+  Menu.buildFromTemplate(buildWindowMenu(ov)).popup({ window: ov.win });
 });
 
-ipcMain.handle('get-config', () => cfg);
+// Each overlay renderer asks for its own slice of the config.
+ipcMain.handle('get-config', (event) => {
+  const ov = overlayFor(event);
+  return ov ? confOf(ov) : null;
+});
 
-// The overlay renderer owns camera enumeration (it holds the permission that
-// makes device labels visible) and reports the list up for the settings window.
+// Intrinsic size of the live stream. Only the renderer knows it (videoWidth /
+// videoHeight), and it's what "Fit window to camera" needs — a virtual camera can
+// report an aspect ratio that has nothing to do with the window's.
+ipcMain.on('video-size', (event, size) => {
+  const ov = overlayFor(event);
+  if (!ov || !size || !size.width || !size.height) return;
+  ov.video = { width: size.width, height: size.height };
+  console.log(`  ${ov.id}: stream ${size.width}×${size.height}`);
+  pushSettings();
+  broadcastState();
+});
+
 ipcMain.on('cameras-reported', (_e, list) => {
   cameras = Array.isArray(list) ? list : [];
   console.log(`  cameras: ${cameras.map((c) => c.label || c.deviceId).join(' | ') || 'none'}`);
   pushSettings();
+});
+
+// Renderer-driven move/resize. index.html can't use -webkit-app-region: drag,
+// because on Windows a drag region swallows right-click before it reaches the
+// page — which would leave the context menu unreachable.
+ipcMain.on('move-start', (event) => {
+  const ov = overlayFor(event);
+  if (ov) ov.dragOrigin = ov.win.getBounds();
+});
+
+ipcMain.on('move-by', (event, { dx, dy }) => {
+  const ov = overlayFor(event);
+  if (!ov || !ov.dragOrigin || ov.mode !== 'windowed') return;
+  ov.win.setBounds({
+    x: ov.dragOrigin.x + Math.round(dx),
+    y: ov.dragOrigin.y + Math.round(dy),
+    width:  ov.dragOrigin.width,
+    height: ov.dragOrigin.height
+  });
+});
+
+ipcMain.on('resize-start', (event) => {
+  const ov = overlayFor(event);
+  if (ov) ov.dragOrigin = ov.win.getBounds();
+});
+
+ipcMain.on('resize-by', (event, { dx, dy }) => {
+  const ov = overlayFor(event);
+  if (!ov || !ov.dragOrigin || ov.mode !== 'windowed') return;
+  ov.win.setBounds({
+    x: ov.dragOrigin.x,
+    y: ov.dragOrigin.y,
+    width:  Math.max(MIN_W, ov.dragOrigin.width  + Math.round(dx)),
+    height: Math.max(MIN_H, ov.dragOrigin.height + Math.round(dy))
+  });
+});
+
+ipcMain.on('drag-end', (event) => {
+  const ov = overlayFor(event);
+  if (!ov) return;
+  ov.dragOrigin = null;
+  saveBounds(ov);
 });
 
 // ---- settings window -------------------------------------------------------
@@ -848,43 +1213,16 @@ ipcMain.handle('settings:apply',      (_e, patch) => { applySettings(patch); ret
 ipcMain.handle('settings:openConfig', () => openConfigInEditor());
 ipcMain.on('settings:close',          () => { if (settingsWin) settingsWin.close(); });
 
-// Renderer-driven move/resize. index.html can't use -webkit-app-region: drag,
-// because on Windows a drag region swallows right-click before it reaches the
-// page — which would leave the context menu unreachable.
-ipcMain.on('move-start', () => { dragOrigin = win.getBounds(); });
-
-ipcMain.on('move-by', (_e, { dx, dy }) => {
-  if (!dragOrigin || mode !== 'windowed') return;
-  win.setBounds({
-    x: dragOrigin.x + Math.round(dx),
-    y: dragOrigin.y + Math.round(dy),
-    width:  dragOrigin.width,
-    height: dragOrigin.height
-  });
-});
-
-ipcMain.on('resize-start', () => { dragOrigin = win.getBounds(); });
-
-ipcMain.on('resize-by', (_e, { dx, dy }) => {
-  if (!dragOrigin || mode !== 'windowed') return;
-  win.setBounds({
-    x: dragOrigin.x,
-    y: dragOrigin.y,
-    width:  Math.max(MIN_W, dragOrigin.width  + Math.round(dx)),
-    height: Math.max(MIN_H, dragOrigin.height + Math.round(dy))
-  });
-});
-
-ipcMain.on('drag-end', () => { dragOrigin = null; saveBounds(); });
-
 // ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
-  createWindow();
+  cfg = loadConfig();
+  for (const conf of cfg.overlays) createOverlay(conf);
+
   createTray();
-  console.log('Webcam Overlay running.');
+  console.log(`Webcam Overlay running — ${cfg.overlays.length} overlay(s).`);
   registerHotkeys();
   watchConfig();
 
@@ -897,7 +1235,7 @@ app.whenReady().then(() => {
     });
   }
 
-  console.log('  Right-click the window (or the tray icon) for the menu.');
+  console.log('  Right-click an overlay (or the tray icon) for the menu.');
   console.log(`  Config: ${CONFIG_PATH}  (edits are picked up live)`);
 });
 

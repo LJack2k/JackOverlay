@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('api', {
 
   // Live corner-radius updates pushed from the main process
   onCornerRadius:  (cb)     => ipcRenderer.on('corner-radius', (_e, px) => cb(px)),
+  onMirror:        (cb)     => ipcRenderer.on('mirror', (_e, on) => cb(on)),
+  onFit:           (cb)     => ipcRenderer.on('fit', (_e, fit) => cb(fit)),
+  reportVideoSize: (w, h)   => ipcRenderer.send('video-size', { width: w, height: h }),
 
   // Camera list / selection
   reportCameras:   (list)   => ipcRenderer.send('cameras-reported', list),

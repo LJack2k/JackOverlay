@@ -9,7 +9,9 @@ it over whatever you're doing.
 ## Features
 
 - Borderless always-on-top webcam window, draggable and resizable
-- Snap it to any of the four screen corners from the menu
+- **As many overlays as you like**, each with its own camera, position, size,
+  corner radius, opacity and mirroring
+- Snap any of them to the four screen corners from the menu
 - **Settings window** — pick your webcam, and adjust everything else without
   touching a config file
 - Right-click menu: Maximize / Minimize / Window mode / Move to corner /
@@ -42,8 +44,13 @@ npm start
 | Snap to a screen corner | Right-click → Move to corner |
 | Resize | Drag the grip in the bottom-right corner |
 | Menu | Right-click the window, or the tray icon |
-| Show / hide | `Ctrl+Alt+W` |
-| Maximize ⇄ window | `Ctrl+Alt+M` |
+| Show / hide **all** overlays | `Ctrl+Alt+W` |
+| Maximize ⇄ window, **primary** overlay | `Ctrl+Alt+M` |
+
+Hiding everything at once is the useful thing, so `Ctrl+Alt+W` acts on every
+overlay. Maximizing everything would just stack windows on top of each other, so
+`Ctrl+Alt+M` sticks to the first overlay in the list. Per-overlay control is in
+each window's own right-click menu.
 
 Maximize fills the display's **work area**, so the taskbar and tray stay reachable —
 you can always get back out. The app always launches in window mode.
@@ -54,11 +61,14 @@ Right-click the overlay (or the tray icon) → **Settings…**
 
 | Section | What's there |
 |---|---|
-| **Camera** | Dropdown of every connected webcam. A saved camera that's currently unplugged stays listed as *not connected* rather than silently switching. |
-| **Appearance** | Opacity and corner radius sliders, applied as you drag. |
+| **Overlays** | A tab per overlay plus **+ Add overlay**. Rename it, pick its webcam, or remove it. A saved camera that's currently unplugged stays listed as *not connected* rather than silently switching. |
+| **Appearance** | Opacity, corner radius, image fit, mirroring, and **Match window to camera** for the selected overlay. |
 | **Position & size** | The four corner presets, width/height, and the corner margin. |
 | **Hotkeys** | Both accelerators, each with an **active** / **taken** badge showing whether it actually registered. |
 | **System** | Start with Windows, config editor, control port. |
+
+The Appearance and Position headers name the overlay they're editing, so it's
+always clear which window a slider is about. Hotkeys and System are global.
 
 Everything applies immediately and is written to `config.json`. The window also
 stays in sync the other way — change something from the tray, a hotkey or the
@@ -88,21 +98,42 @@ The path is absolute, so **re-tick it if you move the project folder**.
     "toggle_visibility": "CommandOrControl+Alt+W",
     "toggle_maximize":   "CommandOrControl+Alt+M"
   },
-  "window": { "x": null, "y": null, "width": 320, "height": 240, "opacity": 0.95 },
-  "corner_radius": 16,
   "corner_margin": 24,
-  "camera_id": null,
-  "camera_label": null,
   "editor": null,
-  "control_port": 28492
+  "control_port": 28492,
+  "overlays": [
+    {
+      "id": "main",
+      "name": "Main",
+      "window": { "x": null, "y": null, "width": 320, "height": 240, "opacity": 0.95 },
+      "corner_radius": 16,
+      "mirror": false,
+      "fit": "cover",
+      "camera_id": null,
+      "camera_label": null
+    }
+  ]
 }
 ```
 
+Each entry in `overlays` is one floating window. Add or remove entries by hand and
+the running app creates or closes windows to match on save.
+
+- `id` — stable identifier; it's what the control channel targets. Don't rename it
+  casually
 - `x`/`y` `null` — auto-place bottom-right on first launch
-- `corner_margin` — gap left between the window and the screen edge when snapping
-  to a corner
 - `camera_id` — `null` uses the system default. `camera_label` is kept alongside it
   so the right camera can still be found if the device id changes
+- `mirror` — flips the image left-to-right. Off by default: it only feels right for
+  a face cam, and makes text or a second angle read backwards
+- `fit` — `cover` crops to fill the window, `contain` shows the whole frame
+  letterboxed, `fill` stretches it. If a camera's shape doesn't match the window,
+  **Match window to camera** in Settings resizes the window instead of cropping
+- `corner_margin` — gap left between a window and the screen edge when snapping
+  to a corner (global)
+
+A pre-multi-overlay config, with `window` / `corner_radius` / `camera_id` at the
+top level, is migrated into `overlays[0]` automatically on first load.
 - `editor` — `null` auto-detects VS Code → Notepad++ → Notepad for the
   "Edit config.json" menu item
 - `control_port` — loopback port for the Stream Deck plugin; `0` disables it
@@ -120,6 +151,15 @@ node -e "require('net').createConnection(28492,'127.0.0.1').end(JSON.stringify({
 
 The channel binds to `127.0.0.1` only and has no authentication — don't change the
 bind host.
+
+## Capture resolution
+
+Cameras are opened with an `ideal` request of 1920×1080. Without a resolution
+constraint Chromium takes whatever the device offers by default, and some virtual
+cameras default to **640×480** — not just low-res but 4:3, so the picture arrives
+with a different aspect ratio than a physical webcam and looks squashed or
+over-cropped. `ideal` rather than `exact` means cameras that can't do 1080p still
+work and simply give their closest match.
 
 ## License
 

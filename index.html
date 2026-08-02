@@ -31,10 +31,13 @@
 
   video {
     width: 100%; height: 100%;
-    object-fit: cover;
+    /* cover crops to fill, contain letterboxes, fill stretches. */
+    object-fit: var(--fit, cover);
     display: block;
-    /* Mirror so it feels natural (like a mirror) */
-    transform: scaleX(-1);
+    /* --flip is -1 when the overlay is set to mirror, 1 otherwise. Off by
+       default: mirroring only feels right for a face cam, and makes anything
+       else (text, a second angle) read backwards. */
+    transform: scaleX(var(--flip, 1));
     /* Also rounded here, not just clipped by #container: a transformed child
        gets its own compositing layer and can bleed past overflow:hidden. */
     border-radius: var(--radius, 16px);
@@ -93,11 +96,36 @@
     );
   }
 
-  // Live updates from the menu's "Corner radius" submenu and from config.json edits
+  function applyMirror(on) {
+    document.documentElement.style.setProperty('--flip', on ? '-1' : '1');
+  }
+
+  function applyFit(fit) {
+    const allowed = ['cover', 'contain', 'fill'];
+    document.documentElement.style.setProperty(
+      '--fit', allowed.includes(fit) ? fit : 'cover'
+    );
+  }
+
+  // Live updates from the menus, the settings window and config.json edits
   window.api.onCornerRadius(applyRadius);
+  window.api.onMirror(applyMirror);
+  window.api.onFit(applyFit);
 
   // ---- Webcam ------------------------------------------------------------
   let stream = null;
+
+  // Report the stream's own dimensions so main can offer "fit window to camera".
+  // Listeners are attached once, not per-start: 'loadedmetadata' can fire before
+  // a listener added straight after setting srcObject, and 'resize' covers the
+  // intrinsic size changing when the camera is switched.
+  function reportVideoSize() {
+    if (video.videoWidth && video.videoHeight) {
+      window.api.reportVideoSize(video.videoWidth, video.videoHeight);
+    }
+  }
+  video.addEventListener('loadedmetadata', reportVideoSize);
+  video.addEventListener('resize', reportVideoSize);
 
   function stopStream() {
     if (!stream) return;
@@ -109,13 +137,23 @@
   async function startCamera(deviceId, allowFallback = true) {
     stopStream();
     try {
-      const constraints = deviceId
-        ? { video: { deviceId: { exact: deviceId } }, audio: false }
-        : { video: true, audio: false };
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Ask for 1080p. Without a resolution constraint Chromium takes whatever
+      // the device offers by default, and some virtual cameras default to
+      // 640x480 — which is not only low-res but 4:3, so the picture arrives with
+      // a different aspect ratio than a physical webcam and looks squashed or
+      // over-cropped. `ideal` (not `exact`) so cameras that can't do 1080p still
+      // work and just give their closest match.
+      const videoConstraints = deviceId ? { deviceId: { exact: deviceId } } : {};
+      videoConstraints.width  = { ideal: 1920 };
+      videoConstraints.height = { ideal: 1080 };
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints, audio: false
+      });
       video.srcObject = stream;
       error.style.display = 'none';
       video.style.display = 'block';
+      reportVideoSize();      // in case metadata is already available
     } catch (e) {
       // A saved camera that has since been unplugged shouldn't leave a dead
       // overlay — fall back to whatever camera is available.
@@ -190,6 +228,8 @@
     try {
       cfg = await window.api.getConfig();
       applyRadius(cfg.corner_radius);
+      applyMirror(cfg.mirror);
+      applyFit(cfg.fit);
     } catch (_) {}
     await startCamera(cfg?.camera_id ?? null);
     await reportCameras();

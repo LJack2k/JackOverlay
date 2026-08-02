@@ -63,6 +63,23 @@
   .val { width: 54px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 
   .corners { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 236px; }
+
+  /* Overlay picker */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .tabs button.tab {
+    padding: 6px 12px; border-radius: 999px;
+    background: #262a31; border: 1px solid var(--line);
+  }
+  .tabs button.tab.sel {
+    background: var(--accent); border-color: var(--accent);
+    color: #06121f; font-weight: 600;
+  }
+  .tabs button.tab .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted); margin-right: 6px; vertical-align: 1px;
+  }
+  .tabs button.tab.live .dot { background: var(--ok); }
+  .tabs button.add { padding: 6px 10px; }
   button {
     background: #30353d; color: var(--text);
     border: 1px solid var(--line); border-radius: 5px;
@@ -95,18 +112,33 @@
 <body>
 <main>
 
-  <h2>Camera</h2>
+  <h2>Overlays</h2>
+  <div class="tabs" id="tabs"></div>
   <div class="panel">
+    <div class="row">
+      <label class="name" for="name">
+        Name
+        <span class="sub">Shown in the menus and reported to controllers</span>
+      </label>
+      <input type="text" id="name" spellcheck="false">
+    </div>
     <div class="row">
       <label class="name" for="camera">
         Webcam
-        <span class="sub" id="cameraNote">Choose which camera the overlay shows.</span>
+        <span class="sub" id="cameraNote">Choose which camera this overlay shows.</span>
       </label>
       <select id="camera"></select>
     </div>
+    <div class="row">
+      <label class="name">
+        Remove this overlay
+        <span class="sub" id="removeNote"></span>
+      </label>
+      <button id="remove">Remove</button>
+    </div>
   </div>
 
-  <h2>Appearance</h2>
+  <h2 id="appearanceH2">Appearance</h2>
   <div class="panel">
     <div class="row">
       <label class="name" for="opacity">Opacity</label>
@@ -118,9 +150,35 @@
       <input type="range" id="radius" min="0" max="80" step="1">
       <span class="val" id="radiusVal"></span>
     </div>
+    <div class="row">
+      <label class="name" for="fit">
+        Image fit
+        <span class="sub" id="fitNote"></span>
+      </label>
+      <select id="fit">
+        <option value="cover">Fill &amp; crop</option>
+        <option value="contain">Fit whole image</option>
+        <option value="fill">Stretch</option>
+      </select>
+    </div>
+    <div class="row">
+      <label class="name">
+        Match window to camera
+        <span class="sub" id="fitCamNote"></span>
+      </label>
+      <button id="fitCam">Resize</button>
+    </div>
+    <div class="row">
+      <label class="name" for="mirror">
+        Mirror image
+        <span class="sub">Flip left-to-right. Natural for a face cam; leave off for
+          anything with text or a second angle.</span>
+      </label>
+      <input type="checkbox" id="mirror">
+    </div>
   </div>
 
-  <h2>Position &amp; size</h2>
+  <h2 id="positionH2">Position &amp; size</h2>
   <div class="panel">
     <div class="row">
       <label class="name">
@@ -206,61 +264,121 @@
   // user is mid-edit, which would fight the caret in text fields.
   let loading = false;
   let snap = null;
+  // Which overlay the per-overlay sections are editing.
+  let sel = null;
 
   const apply = (patch) => window.settings.apply(patch);
+  // Every per-overlay change has to name its target, or main would apply it to
+  // the primary overlay instead of the one on screen.
+  const applyToSel = (patch) => apply({ ...patch, overlay: sel });
+
+  const confFor  = (s, id) => s.config.overlays.find((o) => o.id === id);
+  const stateFor = (s, id) => s.overlays.find((o) => o.id === id);
+
+  function renderTabs(s) {
+    const tabs = $('tabs');
+    tabs.innerHTML = '';
+    for (const ov of s.overlays) {
+      const b = document.createElement('button');
+      b.className = 'tab' + (ov.id === sel ? ' sel' : '') + (ov.visible ? ' live' : '');
+      b.innerHTML = '<span class="dot"></span>';
+      b.appendChild(document.createTextNode(ov.name));
+      b.title = ov.visible ? 'visible' : 'hidden';
+      b.addEventListener('click', () => { sel = ov.id; render(snap); });
+      tabs.appendChild(b);
+    }
+    const add = document.createElement('button');
+    add.className = 'add';
+    add.textContent = '+ Add overlay';
+    add.addEventListener('click', () => apply({ addOverlay: true }));
+    tabs.appendChild(add);
+  }
 
   function render(s) {
     snap = s;
     loading = true;
-    const c = s.config;
 
-    // Camera
-    const sel = $('camera');
-    sel.innerHTML = '';
-    const def = document.createElement('option');
-    def.value = '';
-    def.textContent = 'System default';
-    sel.appendChild(def);
+    // Keep the selection valid across adds and removals.
+    if (!sel || !stateFor(s, sel)) sel = s.overlays.length ? s.overlays[0].id : null;
 
-    for (const cam of s.cameras) {
-      const o = document.createElement('option');
-      o.value = cam.deviceId;
-      o.textContent = cam.label || 'Camera ' + (cam.deviceId || '').slice(0, 6);
-      sel.appendChild(o);
+    renderTabs(s);
+
+    const c  = s.config;
+    const oc = sel ? confFor(s, sel)  : null;
+    const os = sel ? stateFor(s, sel) : null;
+
+    if (oc && os) {
+      $('name').value = oc.name || '';
+      $('appearanceH2').textContent = 'Appearance — ' + oc.name;
+      $('positionH2').textContent   = 'Position & size — ' + oc.name;
+
+      // Camera
+      const cam = $('camera');
+      cam.innerHTML = '';
+      const def = document.createElement('option');
+      def.value = '';
+      def.textContent = 'System default';
+      cam.appendChild(def);
+
+      for (const d of s.cameras) {
+        const o = document.createElement('option');
+        o.value = d.deviceId;
+        o.textContent = d.label || 'Camera ' + (d.deviceId || '').slice(0, 6);
+        cam.appendChild(o);
+      }
+
+      const known = s.cameras.some((d) => d.deviceId === oc.camera_id);
+      if (oc.camera_id && !known) {
+        // Saved camera isn't plugged in; keep it visible rather than silently
+        // snapping the dropdown to something the user didn't choose.
+        const o = document.createElement('option');
+        o.value = oc.camera_id;
+        o.textContent = (oc.camera_label || 'Saved camera') + ' — not connected';
+        cam.appendChild(o);
+      }
+      cam.value = oc.camera_id || '';
+      $('cameraNote').textContent = s.cameras.length
+        ? 'Choose which camera this overlay shows.'
+        : 'No cameras detected yet.';
+
+      $('remove').disabled = s.overlays.length <= 1;
+      $('removeNote').textContent = s.overlays.length <= 1
+        ? 'The last overlay cannot be removed.'
+        : 'Closes the window and drops it from config.json.';
+
+      // Appearance
+      $('opacity').value = Math.round((os.opacity ?? 1) * 100);
+      $('opacityVal').textContent = $('opacity').value + '%';
+      $('radius').value = oc.corner_radius ?? 16;
+      $('radiusVal').textContent = $('radius').value + ' px';
+      $('mirror').checked = !!oc.mirror;
+      $('fit').value = oc.fit || 'cover';
+      $('fitNote').textContent = {
+        cover:   'Crops whatever does not fit the window.',
+        contain: 'Shows the whole frame, letterboxed.',
+        fill:    'Stretches to the window — distorts the image.'
+      }[oc.fit || 'cover'];
+
+      const v = os.video;
+      $('fitCam').disabled = !v;
+      $('fitCamNote').textContent = v
+        ? `Sets the height to match the ${v.width}×${v.height} stream, so nothing is cropped.`
+        : 'Waiting for the camera to report its size.';
+
+      // Position & size
+      for (const b of document.querySelectorAll('[data-corner]')) {
+        b.classList.toggle('on', os.corner === b.dataset.corner && os.mode === 'windowed');
+      }
+      $('cornerNote').textContent =
+        os.mode === 'maximized' ? 'Currently maximized — this will restore it first.'
+        : os.corner            ? 'Currently in the ' + os.corner.replace('-', ' ') + ' corner.'
+                               : 'Not in a corner right now.';
+      if (os.bounds) {
+        $('width').value  = os.bounds.width;
+        $('height').value = os.bounds.height;
+      }
     }
 
-    const known = s.cameras.some((cam) => cam.deviceId === c.camera_id);
-    if (c.camera_id && !known) {
-      // Saved camera isn't plugged in; keep it visible rather than silently
-      // snapping the dropdown to something the user didn't choose.
-      const o = document.createElement('option');
-      o.value = c.camera_id;
-      o.textContent = (c.camera_label || 'Saved camera') + ' — not connected';
-      sel.appendChild(o);
-    }
-    sel.value = c.camera_id || '';
-    $('cameraNote').textContent = s.cameras.length
-      ? 'Choose which camera the overlay shows.'
-      : 'No cameras detected yet.';
-
-    // Appearance
-    $('opacity').value = Math.round((c.window.opacity ?? 1) * 100);
-    $('opacityVal').textContent = $('opacity').value + '%';
-    $('radius').value = c.corner_radius ?? 16;
-    $('radiusVal').textContent = $('radius').value + ' px';
-
-    // Position & size
-    for (const b of document.querySelectorAll('[data-corner]')) {
-      b.classList.toggle('on', s.corner === b.dataset.corner && s.mode === 'windowed');
-    }
-    $('cornerNote').textContent =
-      s.mode === 'maximized' ? 'Currently maximized — this will restore it first.'
-      : s.corner            ? 'Currently in the ' + s.corner.replace('-', ' ') + ' corner.'
-                            : 'Not in a corner right now.';
-    if (s.bounds) {
-      $('width').value  = s.bounds.width;
-      $('height').value = s.bounds.height;
-    }
     $('margin').value = c.corner_margin ?? 24;
 
     // Hotkeys
@@ -288,31 +406,52 @@
   $('camera').addEventListener('change', (e) => {
     if (loading) return;
     const opt = e.target.selectedOptions[0];
-    apply({ camera_id: e.target.value || null, camera_label: e.target.value ? opt.textContent : null });
+    applyToSel({
+      camera_id:    e.target.value || null,
+      camera_label: e.target.value ? opt.textContent : null
+    });
   });
 
   $('opacity').addEventListener('input', (e) => {
     $('opacityVal').textContent = e.target.value + '%';
-    if (!loading) apply({ opacity: Number(e.target.value) / 100 });
+    if (!loading) applyToSel({ opacity: Number(e.target.value) / 100 });
   });
 
   $('radius').addEventListener('input', (e) => {
     $('radiusVal').textContent = e.target.value + ' px';
-    if (!loading) apply({ corner_radius: Number(e.target.value) });
+    if (!loading) applyToSel({ corner_radius: Number(e.target.value) });
   });
 
+  $('mirror').addEventListener('change', (e) => {
+    if (!loading) applyToSel({ mirror: e.target.checked });
+  });
+
+  $('fit').addEventListener('change', (e) => {
+    if (!loading) applyToSel({ fit: e.target.value });
+  });
+
+  $('fitCam').addEventListener('click', () => applyToSel({ fitToCamera: true }));
+
   for (const b of document.querySelectorAll('[data-corner]')) {
-    b.addEventListener('click', () => apply({ corner: b.dataset.corner }));
+    b.addEventListener('click', () => applyToSel({ corner: b.dataset.corner }));
   }
 
-  const onCommit = (el, build) => {
-    const fire = () => { if (!loading) apply(build(el.value)); };
+  $('remove').addEventListener('click', () => {
+    if (sel) apply({ removeOverlay: sel });
+  });
+
+  const onCommit = (el, build, perOverlay) => {
+    const fire = () => {
+      if (loading) return;
+      (perOverlay ? applyToSel : apply)(build(el.value));
+    };
     el.addEventListener('change', fire);
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
   };
 
-  onCommit($('width'),  (v) => ({ width:  Number(v) }));
-  onCommit($('height'), (v) => ({ height: Number(v) }));
+  onCommit($('name'),   (v) => ({ name: v }),            true);
+  onCommit($('width'),  (v) => ({ width:  Number(v) }),  true);
+  onCommit($('height'), (v) => ({ height: Number(v) }),  true);
   onCommit($('margin'), (v) => ({ corner_margin: Number(v) }));
   onCommit($('port'),   (v) => ({ control_port: Number(v) }));
   onCommit($('editor'), (v) => ({ editor: v.trim() || null }));
@@ -329,7 +468,7 @@
   window.settings.onChange((s) => {
     // Don't yank a field the user is typing in.
     const active = document.activeElement;
-    const typing = active && (active.tagName === 'INPUT' && active.type === 'text');
+    const typing = active && active.tagName === 'INPUT' && active.type === 'text';
     if (typing) { snap = s; return; }
     render(s);
   });
