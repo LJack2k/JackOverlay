@@ -156,6 +156,16 @@ node -e "require('net').createConnection(28492,'127.0.0.1').end(JSON.stringify({
 The channel binds to `127.0.0.1` only and has no authentication — don't change the
 bind host.
 
+## Hidden overlays release their camera
+
+Hiding an overlay stops its video tracks, which frees the device and puts the
+capture light out — another app can claim it, and an overlay restored in the
+hidden state never opens a camera at all. Showing it re-acquires.
+
+One consequence: device *labels* only become readable once something has been
+granted camera access, so if **every** overlay starts hidden the camera dropdown
+lists devices by id until you show one.
+
 ## Capture resolution
 
 Cameras are opened with an `ideal` request of 1920×1080. Without a resolution

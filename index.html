@@ -127,15 +127,24 @@
   video.addEventListener('loadedmetadata', reportVideoSize);
   video.addEventListener('resize', reportVideoSize);
 
-  function stopStream() {
-    if (!stream) return;
-    // Release the device, or switching cameras can fail with the old one still open.
-    for (const track of stream.getTracks()) track.stop();
-    stream = null;
+  // Bumped by every release, so a getUserMedia that resolves after the overlay
+  // was hidden (or the camera switched again) can tell it has been superseded
+  // and throw its stream away instead of quietly turning the device back on.
+  let generation = 0;
+
+  function releaseCamera() {
+    generation++;
+    if (stream) {
+      // stop() is what actually frees the device and puts the capture light out.
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+    }
+    video.srcObject = null;
   }
 
   async function startCamera(deviceId, allowFallback = true) {
-    stopStream();
+    releaseCamera();
+    const gen = generation;
     try {
       // Ask for 1080p. Without a resolution constraint Chromium takes whatever
       // the device offers by default, and some virtual cameras default to
@@ -147,9 +156,18 @@
       videoConstraints.width  = { ideal: 1920 };
       videoConstraints.height = { ideal: 1080 };
 
-      stream = await navigator.mediaDevices.getUserMedia({
+      const opened = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints, audio: false
       });
+
+      // Hidden (or switched again) while getUserMedia was in flight — drop it
+      // rather than attaching a device we are no longer meant to be holding.
+      if (gen !== generation) {
+        for (const track of opened.getTracks()) track.stop();
+        return;
+      }
+
+      stream = opened;
       video.srcObject = stream;
       error.style.display = 'none';
       video.style.display = 'block';
@@ -177,8 +195,33 @@
     } catch (_) {}
   }
 
-  window.api.onSetCamera((id) => startCamera(id));
-  navigator.mediaDevices.addEventListener('devicechange', reportCameras);
+  // Whether this overlay is on screen. A hidden one holds no camera at all, so
+  // its capture light is off and the device is free for other apps.
+  let visible = true;
+  let cameraId = null;
+
+  async function activate() {
+    await startCamera(cameraId);
+    await reportCameras();
+  }
+
+  window.api.onVisible((on) => {
+    if (on === visible) return;
+    visible = on;
+    if (on) activate();
+    else releaseCamera();
+  });
+
+  window.api.onSetCamera((id) => {
+    cameraId = id;
+    // Don't wake the device just to honour a setting change while hidden; the
+    // new camera is picked up when the overlay is shown again.
+    if (visible) activate();
+  });
+
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    if (visible) reportCameras();
+  });
 
   // ---- Move / resize ----------------------------------------------------
   // Absolute offsets from the grab point, so the window can't drift.
@@ -231,8 +274,13 @@
       applyMirror(cfg.mirror);
       applyFit(cfg.fit);
     } catch (_) {}
-    await startCamera(cfg?.camera_id ?? null);
-    await reportCameras();
+
+    cameraId = cfg?.camera_id ?? null;
+    visible  = cfg?.visible !== false;
+
+    // An overlay restored in the hidden state never opens its camera at all —
+    // it waits until it is actually shown.
+    if (visible) await activate();
   })();
 })();
 </script>

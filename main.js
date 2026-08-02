@@ -244,6 +244,14 @@ function applyMirror(ov) {
   }
 }
 
+// Tells the renderer whether to hold the camera. A hidden overlay releases the
+// device so its capture light goes out and other apps can claim it.
+function applyVisible(ov) {
+  if (ov.win && !ov.win.isDestroyed()) {
+    ov.win.webContents.send('visible', ov.win.isVisible());
+  }
+}
+
 function setMirror(ov, on) {
   confOf(ov).mirror = !!on;
   saveConfig(cfg);
@@ -466,6 +474,7 @@ function saveVisibility(ov) {
 function showWindow(ov) {
   ov.win.show();
   ov.win.focus();
+  applyVisible(ov);
   saveVisibility(ov);
   broadcastState();
 }
@@ -506,6 +515,7 @@ function windowModeWindow(ov) {
 // show/hide hotkey both bring it back.
 function minimizeWindow(ov) {
   ov.win.hide();
+  applyVisible(ov);
   saveVisibility(ov);
   broadcastState();
 }
@@ -820,6 +830,7 @@ function reloadConfigFromDisk() {
     const wantVisible = conf.visible !== false;
     if (wantVisible && !ov.win.isVisible()) ov.win.show();
     else if (!wantVisible && ov.win.isVisible()) ov.win.hide();
+    applyVisible(ov);
 
     if (ov.mode === 'windowed' && conf.window.x != null && conf.window.y != null) {
       ov.win.setBounds({
