@@ -106,6 +106,7 @@ The path is absolute, so **re-tick it if you move the project folder**.
       "id": "main",
       "name": "Main",
       "window": { "x": null, "y": null, "width": 320, "height": 240, "opacity": 0.95 },
+      "visible": true,
       "corner_radius": 16,
       "mirror": false,
       "fit": "cover",
@@ -122,6 +123,9 @@ the running app creates or closes windows to match on save.
 - `id` — stable identifier; it's what the control channel targets. Don't rename it
   casually
 - `x`/`y` `null` — auto-place bottom-right on first launch
+- `visible` — an overlay comes back the way it was left, so one you hid stays hidden
+  across a restart. If you quit with everything hidden the app still starts, just
+  with nothing but the tray icon — `Ctrl+Alt+W` brings them back
 - `camera_id` — `null` uses the system default. `camera_label` is kept alongside it
   so the right camera can still be found if the device id changes
 - `mirror` — flips the image left-to-right. Off by default: it only feels right for

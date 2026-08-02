@@ -53,6 +53,9 @@ function defaultOverlay(id, name) {
     id,
     name,
     window: { x: null, y: null, width: 320, height: 240, opacity: 0.95 },
+    // Kept out of `window` on purpose: saveBounds() deliberately skips writing
+    // while maximized, whereas visibility should always be recorded.
+    visible: true,
     corner_radius: 16,
     // Mirror the image left-to-right. Natural for a face cam, wrong for a camera
     // pointed at anything else (text reads backwards), so it defaults to off.
@@ -449,9 +452,21 @@ function openConfigInEditor() {
 // Window modes
 // ---------------------------------------------------------------------------
 
+// Persisted so an overlay comes back the way it was left, like every other
+// per-overlay setting.
+function saveVisibility(ov) {
+  const conf = confOf(ov);
+  if (!conf) return;
+  const vis = !!(ov.win && !ov.win.isDestroyed() && ov.win.isVisible());
+  if (conf.visible === vis) return;      // don't churn the file on no-op toggles
+  conf.visible = vis;
+  saveConfig(cfg);
+}
+
 function showWindow(ov) {
   ov.win.show();
   ov.win.focus();
+  saveVisibility(ov);
   broadcastState();
 }
 
@@ -491,6 +506,7 @@ function windowModeWindow(ov) {
 // show/hide hotkey both bring it back.
 function minimizeWindow(ov) {
   ov.win.hide();
+  saveVisibility(ov);
   broadcastState();
 }
 
@@ -564,6 +580,9 @@ function buildWindow(conf) {
   const win = new BrowserWindow({
     x, y, width: w, height: h,
     minWidth: MIN_W, minHeight: MIN_H,
+    // Restore the visibility it was left with. The page still loads while
+    // hidden, so the camera and radius are ready the moment it is shown.
+    show:        conf.visible !== false,
     frame:       false,
     transparent: true,
     alwaysOnTop: true,
@@ -795,6 +814,13 @@ function reloadConfigFromDisk() {
     applyMirror(ov);
     applyFit(ov);
     ov.win.webContents.send('set-camera', conf.camera_id);
+
+    // Raw show/hide rather than the helpers: those persist, which would write
+    // the file straight back during a reload of that same file.
+    const wantVisible = conf.visible !== false;
+    if (wantVisible && !ov.win.isVisible()) ov.win.show();
+    else if (!wantVisible && ov.win.isVisible()) ov.win.hide();
+
     if (ov.mode === 'windowed' && conf.window.x != null && conf.window.y != null) {
       ov.win.setBounds({
         x: conf.window.x, y: conf.window.y,
