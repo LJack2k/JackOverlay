@@ -1,8 +1,8 @@
 {
-  "UUID": "com.eddy.webcamoverlay",
+  "UUID": "com.ljack2k.webcamoverlay",
   "Name": "Webcam Overlay",
-  "Version": "1.1.0.0",
-  "Author": "Eddy",
+  "Version": "1.2.0.0",
+  "Author": "LJack2k",
   "Description": "Control the floating webcam overlay — show, hide, maximize, window mode, opacity and corner radius. Each button lights up while the overlay is in that state.",
   "Category": "Webcam Overlay",
   "CategoryIcon": "imgs/plugin/category",
@@ -25,7 +25,7 @@
   },
   "Actions": [
     {
-      "UUID": "com.eddy.webcamoverlay.show",
+      "UUID": "com.ljack2k.webcamoverlay.show",
       "Name": "Show",
       "Tooltip": "Show the overlay. Lit while the overlay is visible.",
       "Icon": "imgs/actions/show/icon",
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "UUID": "com.eddy.webcamoverlay.hide",
+      "UUID": "com.ljack2k.webcamoverlay.hide",
       "Name": "Hide",
       "Tooltip": "Hide the overlay. Lit while the overlay is hidden.",
       "Icon": "imgs/actions/hide/icon",
@@ -49,7 +49,7 @@
       ]
     },
     {
-      "UUID": "com.eddy.webcamoverlay.maximize",
+      "UUID": "com.ljack2k.webcamoverlay.maximize",
       "Name": "Maximize",
       "Tooltip": "Maximize the overlay. Lit while the overlay is maximized.",
       "Icon": "imgs/actions/maximize/icon",
@@ -61,7 +61,7 @@
       ]
     },
     {
-      "UUID": "com.eddy.webcamoverlay.window",
+      "UUID": "com.ljack2k.webcamoverlay.window",
       "Name": "Window Mode",
       "Tooltip": "Return the overlay to window mode. Lit while the overlay is windowed.",
       "Icon": "imgs/actions/window/icon",
@@ -73,7 +73,7 @@
       ]
     },
     {
-      "UUID": "com.eddy.webcamoverlay.opacity",
+      "UUID": "com.ljack2k.webcamoverlay.opacity",
       "Name": "Opacity",
       "Tooltip": "Rotate to adjust overlay opacity; press to reset to 100%",
       "Icon": "imgs/actions/opacity/icon",
@@ -92,7 +92,7 @@
       }
     },
     {
-      "UUID": "com.eddy.webcamoverlay.radius",
+      "UUID": "com.ljack2k.webcamoverlay.radius",
       "Name": "Corner Radius",
       "Tooltip": "Rotate to adjust corner radius; press to reset to 16 px",
       "Icon": "imgs/actions/radius/icon",

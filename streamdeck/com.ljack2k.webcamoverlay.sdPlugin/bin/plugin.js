@@ -86,24 +86,24 @@ class StateButton extends OverlayAction {
 }
 
 class Show extends StateButton {
-	manifestId = "com.eddy.webcamoverlay.show";
+	manifestId = "com.ljack2k.webcamoverlay.show";
 	config = { cmd: "show", active: (s) => s.visible };
 }
 
 class Hide extends StateButton {
-	manifestId = "com.eddy.webcamoverlay.hide";
+	manifestId = "com.ljack2k.webcamoverlay.hide";
 	config = { cmd: "hide", active: (s) => !s.visible };
 }
 
 // A hidden overlay is neither maximized nor windowed as far as the user is
 // concerned, so neither mode button lights while it is out of sight.
 class Maximize extends StateButton {
-	manifestId = "com.eddy.webcamoverlay.maximize";
+	manifestId = "com.ljack2k.webcamoverlay.maximize";
 	config = { cmd: "maximize", active: (s) => s.visible && s.mode === "maximized" };
 }
 
 class WindowMode extends StateButton {
-	manifestId = "com.eddy.webcamoverlay.window";
+	manifestId = "com.ljack2k.webcamoverlay.window";
 	config = { cmd: "windowMode", active: (s) => s.visible && s.mode === "windowed" };
 }
 
@@ -168,7 +168,7 @@ class KnobAction extends OverlayAction {
 }
 
 class Opacity extends KnobAction {
-	manifestId = "com.eddy.webcamoverlay.opacity";
+	manifestId = "com.ljack2k.webcamoverlay.opacity";
 	config = {
 		title: "Opacity",
 		nudge: "nudgeOpacity",
@@ -190,7 +190,7 @@ class Opacity extends KnobAction {
 }
 
 class Radius extends KnobAction {
-	manifestId = "com.eddy.webcamoverlay.radius";
+	manifestId = "com.ljack2k.webcamoverlay.radius";
 	config = {
 		title: "Corner radius",
 		nudge: "nudgeRadius",

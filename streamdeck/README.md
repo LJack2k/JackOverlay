@@ -101,7 +101,7 @@ maximizing also shows the window.
 from there at runtime:
 
 ```bash
-cd streamdeck/com.eddy.webcamoverlay.sdPlugin && npm install
+cd streamdeck/com.ljack2k.webcamoverlay.sdPlugin && npm install
 ```
 
 Regenerate the icon set:
@@ -111,17 +111,17 @@ pwsh -File tools\make-icons.ps1
 ```
 
 ```bash
-npx @elgato/cli validate com.eddy.webcamoverlay.sdPlugin
+npx @elgato/cli validate com.ljack2k.webcamoverlay.sdPlugin
 ```
 
 ```bash
-npx @elgato/cli restart com.eddy.webcamoverlay
+npx @elgato/cli restart com.ljack2k.webcamoverlay
 ```
 
-`streamdeck link` has already been run — `%APPDATA%\Elgato\StreamDeck\Plugins\com.eddy.webcamoverlay.sdPlugin`
+`streamdeck link` has already been run — `%APPDATA%\Elgato\StreamDeck\Plugins\com.ljack2k.webcamoverlay.sdPlugin`
 is a **junction** to this folder, so edits here are live; just `restart` after changing `bin/`.
 
-Plugin logs land in `com.eddy.webcamoverlay.sdPlugin/logs/`.
+Plugin logs land in `com.ljack2k.webcamoverlay.sdPlugin/logs/`.
 
 ## Notes for anyone extending this
 
@@ -132,10 +132,10 @@ needed for the `@action` decorator, and the decorator merely sets a `manifestId`
 class field — so a plain field does the same job:
 
 ```js
-class Visibility extends SingletonAction {
-  manifestId = "com.eddy.webcamoverlay.visibility";
+class Show extends SingletonAction {
+  manifestId = "com.ljack2k.webcamoverlay.show";
 }
-streamDeck.actions.registerAction(new Visibility());
+streamDeck.actions.registerAction(new Show());
 ```
 
 **Stream Deck runs plugins on its own bundled Node 20.20.0**, not the system Node.
@@ -156,7 +156,13 @@ yields a zero-length buffer *without throwing*.
 web view; a remote script means a blank settings panel whenever the machine is
 offline. `ui/port.html` talks the raw property-inspector socket protocol instead.
 
-**Renaming an action UUID orphans placed keys.** v1.0 shipped two toggles
-(`…visibility`, `…windowmode`); v1.1 replaced them with the four dedicated buttons
-above. Stream Deck keys are bound to the action UUID, so any key using a removed
-UUID has to be dragged on again — the profile can't migrate itself.
+**Renaming an action UUID orphans placed keys.** Stream Deck binds each key to an
+action UUID, so any key using a UUID that no longer exists has to be dragged on
+again — the profile cannot migrate itself. This has bitten the plugin twice:
+
+- **v1.1** replaced the two toggles (`…visibility`, `…windowmode`) with the four
+  dedicated state buttons above.
+- **v1.2** renamed the whole plugin from `com.eddy.*` to `com.ljack2k.*`, which
+  changes every action UUID at once.
+
+Treat the UUID namespace as permanent from here on.

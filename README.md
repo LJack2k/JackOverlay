@@ -79,12 +79,6 @@ node -e "require('net').createConnection(28492,'127.0.0.1').end(JSON.stringify({
 The channel binds to `127.0.0.1` only and has no authentication — don't change the
 bind host.
 
-## Notes
-
-[HANDOVER.md](HANDOVER.md) has the deeper engineering notes: why there's no
-`-webkit-app-region: drag`, why maximize uses `workArea`, the Electron install
-recovery procedure, and other things worth not rediscovering the hard way.
-
 ## License
 
 MIT

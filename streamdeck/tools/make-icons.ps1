@@ -14,7 +14,7 @@
 
 Add-Type -AssemblyName System.Drawing
 
-$OutRoot = Join-Path $PSScriptRoot '..\com.eddy.webcamoverlay.sdPlugin'
+$OutRoot = Join-Path $PSScriptRoot '..\com.ljack2k.webcamoverlay.sdPlugin'
 
 $White     = [System.Drawing.Color]::FromArgb(255, 255, 255, 255)
 $Accent    = [System.Drawing.Color]::FromArgb(255,  74, 163, 255)
