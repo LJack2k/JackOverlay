@@ -22,7 +22,7 @@ lit and nothing changes.
 A hidden overlay is neither maximized nor windowed as far as the user is concerned,
 so both mode buttons go dim while it is out of sight — only **Hide** stays lit.
 
-Two knob actions, unchanged:
+Two knob actions:
 
 | Action | Controllers | Behaviour |
 |---|---|---|
@@ -118,8 +118,18 @@ npx @elgato/cli validate com.ljack2k.webcamoverlay.sdPlugin
 npx @elgato/cli restart com.ljack2k.webcamoverlay
 ```
 
-`streamdeck link` has already been run — `%APPDATA%\Elgato\StreamDeck\Plugins\com.ljack2k.webcamoverlay.sdPlugin`
-is a **junction** to this folder, so edits here are live; just `restart` after changing `bin/`.
+Link it into Stream Deck. Developer mode has to be on first:
+
+```bash
+npx @elgato/cli dev
+```
+
+```bash
+npx @elgato/cli link com.ljack2k.webcamoverlay.sdPlugin
+```
+
+That puts a **junction** at `%APPDATA%\Elgato\StreamDeck\Plugins\com.ljack2k.webcamoverlay.sdPlugin`
+pointing back here, so edits are live — `restart` is enough after changing `bin/`.
 
 Plugin logs land in `com.ljack2k.webcamoverlay.sdPlugin/logs/`.
 
@@ -142,11 +152,11 @@ streamDeck.actions.registerAction(new Show());
 That runtime has no global `WebSocket`, which is why the SDK pulls in `ws`. Target
 Node 20 syntax, not whatever `node --version` says.
 
-**`streamdeck validate` does not check that images decode.** It passed cleanly
-while all 28 PNGs were zero bytes, and again while they were all written without
-a `.png` extension. `tools/make-icons.ps1` therefore asserts a minimum file size
-itself, and the manifest cross-check in the project's handover doc verifies every
-declared image path resolves at both 1x and 2x.
+**`streamdeck validate` does not check that images decode.** It passes happily
+with image files that are zero bytes, or that were written without a `.png`
+extension at all. `tools/make-icons.ps1` therefore asserts a minimum file size on
+every file it writes; if you add artwork by any other route, check by hand that
+each path declared in `manifest.json` resolves at both 1x and 2x.
 
 **Icons are drawn with GDI+, not Electron.** `capturePage()` and offscreen `paint`
 both return empty images for a window that is never composited, and `toPNG()` then
@@ -156,13 +166,7 @@ yields a zero-length buffer *without throwing*.
 web view; a remote script means a blank settings panel whenever the machine is
 offline. `ui/port.html` talks the raw property-inspector socket protocol instead.
 
-**Renaming an action UUID orphans placed keys.** Stream Deck binds each key to an
-action UUID, so any key using a UUID that no longer exists has to be dragged on
-again — the profile cannot migrate itself. This has bitten the plugin twice:
-
-- **v1.1** replaced the two toggles (`…visibility`, `…windowmode`) with the four
-  dedicated state buttons above.
-- **v1.2** renamed the whole plugin from `com.eddy.*` to `com.ljack2k.*`, which
-  changes every action UUID at once.
-
-Treat the UUID namespace as permanent from here on.
+**Treat action UUIDs as permanent.** Stream Deck binds every placed key to its
+action UUID, so changing one orphans each key already using it — the profile
+cannot migrate itself, and the button has to be dragged onto the device again.
+Renaming the plugin namespace changes all six at once.
