@@ -7,7 +7,7 @@ Verified against Stream Deck **7.4.2** with a **Stream Deck +** and Stream Deck 
 
 ## Actions
 
-Four **dedicated state buttons**. Each one puts the overlay into a single specific
+Eight **dedicated state buttons**. Each one puts the overlay into a single specific
 state, and is **lit while the overlay is currently in that state** — the key reports
 what is true now, not what pressing it would do. Press it again when it's already
 lit and nothing changes.
@@ -18,9 +18,18 @@ lit and nothing changes.
 | **Hide** | `hide` | The overlay is hidden |
 | **Maximize** | `maximize` | The overlay is visible **and** maximized |
 | **Window Mode** | `windowMode` | The overlay is visible **and** windowed |
+| **Corner: Top Left** | `snapCorner` `top-left` | Parked in that corner |
+| **Corner: Top Right** | `snapCorner` `top-right` | Parked in that corner |
+| **Corner: Bottom Left** | `snapCorner` `bottom-left` | Parked in that corner |
+| **Corner: Bottom Right** | `snapCorner` `bottom-right` | Parked in that corner |
 
 A hidden overlay is neither maximized nor windowed as far as the user is concerned,
-so both mode buttons go dim while it is out of sight — only **Hide** stays lit.
+so the mode and corner buttons all go dim while it is out of sight — only **Hide**
+stays lit.
+
+At most one corner button is ever lit, and none are once the window has been dragged
+away from a corner: the overlay reports the corner it is actually in rather than the
+last one that was asked for. Snapping while maximized drops back to window mode first.
 
 Two knob actions:
 
@@ -80,6 +89,7 @@ Commands the plugin sends:
 | `nudgeOpacity` | `delta` | Relative opacity |
 | `setRadius` | `value` 0–200 | Absolute corner radius |
 | `nudgeRadius` | `delta` | Relative corner radius |
+| `snapCorner` | `corner` | Park in `top-left` / `top-right` / `bottom-left` / `bottom-right` |
 | `quit` | — | Quit the overlay |
 
 Out-of-range values are clamped by the overlay, and unknown verbs are ignored
@@ -88,8 +98,19 @@ rather than throwing — the plugin can't wedge the overlay with a bad message.
 The overlay pushes this on connect and after every change:
 
 ```json
-{ "event": "state", "mode": "windowed", "visible": true, "opacity": 1, "radius": 16 }
+{
+  "event": "state",
+  "mode": "windowed",
+  "visible": true,
+  "opacity": 1,
+  "radius": 16,
+  "corner": "bottom-right"
+}
 ```
+
+`corner` is the screen corner the window is currently parked in, or `null` when it
+sits anywhere else — computed from the live bounds, so dragging the window off a
+corner clears it.
 
 Pushes are coalesced (20 ms) because one action often touches several setters —
 maximizing also shows the window.

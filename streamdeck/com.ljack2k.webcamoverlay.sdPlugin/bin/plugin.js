@@ -66,11 +66,17 @@ class OverlayAction extends SingletonAction {
  * changed. State here is owned entirely by the overlay.
  */
 class StateButton extends OverlayAction {
-	/** @type {{ cmd: string, active: (state: object) => boolean }} */
+	/**
+	 * @type {{
+	 *   cmd: string,
+	 *   args?: object,
+	 *   active: (state: object) => boolean
+	 * }}
+	 */
 	config = null;
 
 	async onKeyDown() {
-		if (!overlay.send(this.config.cmd)) {
+		if (!overlay.send(this.config.cmd, this.config.args)) {
 			for (const a of this.actions) await a.showAlert();
 		}
 	}
@@ -106,6 +112,30 @@ class WindowMode extends StateButton {
 	manifestId = "com.ljack2k.webcamoverlay.window";
 	config = { cmd: "windowMode", active: (s) => s.visible && s.mode === "windowed" };
 }
+
+/**
+ * Parks the overlay in one screen corner. The overlay reports which corner it is
+ * currently in (or null once it has been dragged somewhere else), so these light
+ * up the same way the mode buttons do.
+ */
+class CornerButton extends StateButton {
+	constructor(id, corner) {
+		super();
+		this.manifestId = `com.ljack2k.webcamoverlay.${id}`;
+		this.config = {
+			cmd: "snapCorner",
+			args: { corner },
+			active: (s) => s.visible && s.corner === corner,
+		};
+	}
+}
+
+const CORNER_BUTTONS = [
+	["topleft", "top-left"],
+	["topright", "top-right"],
+	["bottomleft", "bottom-left"],
+	["bottomright", "bottom-right"],
+];
 
 // ---------------------------------------------------------------------------
 // Dial-friendly numeric actions (opacity, corner radius)
@@ -216,7 +246,15 @@ class Radius extends KnobAction {
 // Wire up
 // ---------------------------------------------------------------------------
 
-for (const button of [new Show(), new Hide(), new Maximize(), new WindowMode()]) {
+const buttons = [
+	new Show(),
+	new Hide(),
+	new Maximize(),
+	new WindowMode(),
+	...CORNER_BUTTONS.map(([id, corner]) => new CornerButton(id, corner)),
+];
+
+for (const button of buttons) {
 	stateButtons.push(button);
 	streamDeck.actions.registerAction(button);
 }

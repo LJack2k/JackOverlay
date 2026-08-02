@@ -20,6 +20,17 @@ const MIN_H = 120;
 
 const RADIUS_PRESETS = [0, 6, 10, 16, 24, 32, 48];
 
+const CORNERS = {
+  'top-left':     'Top left',
+  'top-right':    'Top right',
+  'bottom-left':  'Bottom left',
+  'bottom-right': 'Bottom right'
+};
+
+// Slack when deciding which corner the window is parked in, so a corner still
+// reads as "current" after a rounding pass through setBounds.
+const CORNER_TOLERANCE = 2;
+
 const DEFAULT_CONFIG = {
   hotkeys: {
     toggle_visibility: 'CommandOrControl+Alt+W',
@@ -33,6 +44,8 @@ const DEFAULT_CONFIG = {
     opacity: 0.95
   },
   corner_radius: 16,
+  // Gap left between the window and the screen edge when snapping to a corner.
+  corner_margin: 24,
   // Command or absolute path used by "Edit config.json".
   // null = auto-detect (VS Code, then Notepad++, then Notepad).
   editor: null,
@@ -303,7 +316,8 @@ function currentState() {
     mode:    mode,                                   // 'windowed' | 'maximized'
     visible: !!win && !win.isDestroyed() && win.isVisible(),
     opacity: win && !win.isDestroyed() ? Math.round(win.getOpacity() * 100) / 100 : 1,
-    radius:  cfg.corner_radius
+    radius:  cfg.corner_radius,
+    corner:  currentCorner()                         // corner key, or null
   };
 }
 
@@ -330,6 +344,7 @@ function handleControlCommand(msg) {
     case 'nudgeOpacity':     setOpacity(win.getOpacity() + Number(msg.delta || 0)); break;
     case 'setRadius':        setCornerRadius(msg.value); break;
     case 'nudgeRadius':      setCornerRadius(cfg.corner_radius + Number(msg.delta || 0)); break;
+    case 'snapCorner':       snapToCorner(String(msg.corner)); break;
     case 'quit':             app.quit();             return;
     default:                 return;                 // unknown verb: ignore
   }
@@ -384,6 +399,52 @@ function minimizeWindow() {
   broadcastState();
 }
 
+// ---------------------------------------------------------------------------
+// Screen-corner presets
+// ---------------------------------------------------------------------------
+
+// Where the window would sit if parked in `corner` on the display it's on now.
+// workArea, not bounds, so the window never lands under the taskbar.
+function cornerOrigin(corner, bounds) {
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const m = cfg.corner_margin;
+  return {
+    x: corner.endsWith('left')
+      ? workArea.x + m
+      : workArea.x + workArea.width - bounds.width - m,
+    y: corner.startsWith('top')
+      ? workArea.y + m
+      : workArea.y + workArea.height - bounds.height - m
+  };
+}
+
+function snapToCorner(corner) {
+  if (!(corner in CORNERS)) return;
+
+  // A maximized window has no corner to speak of, so drop back to windowed
+  // first rather than silently doing nothing.
+  if (mode === 'maximized') windowModeWindow();
+
+  const b = win.getBounds();
+  const { x, y } = cornerOrigin(corner, b);
+  win.setBounds({ x: Math.round(x), y: Math.round(y), width: b.width, height: b.height });
+  showWindow();
+  saveBounds();
+}
+
+// Which corner the window is currently parked in, or null if it's somewhere else.
+function currentCorner() {
+  if (!win || win.isDestroyed() || mode !== 'windowed') return null;
+  const b = win.getBounds();
+  for (const corner of Object.keys(CORNERS)) {
+    const { x, y } = cornerOrigin(corner, b);
+    if (Math.abs(b.x - x) <= CORNER_TOLERANCE && Math.abs(b.y - y) <= CORNER_TOLERANCE) {
+      return corner;
+    }
+  }
+  return null;
+}
+
 function toggleMaximize() {
   if (mode === 'maximized') windowModeWindow();
   else maximizeWindow();
@@ -408,6 +469,19 @@ function opacityItems() {
   }));
 }
 
+function cornerItems() {
+  const current = currentCorner();
+  const isMax = mode === 'maximized';
+  return Object.entries(CORNERS).map(([key, label]) => ({
+    label,
+    type:    'radio',
+    // Nothing is "current" while maximized, so leave them all unchecked rather
+    // than implying the window is parked somewhere it isn't.
+    checked: !isMax && current === key,
+    click:   () => snapToCorner(key)
+  }));
+}
+
 function buildMenuTemplate() {
   const isMax  = mode === 'maximized';
   const hidden = !win.isVisible();
@@ -424,6 +498,8 @@ function buildMenuTemplate() {
     { label: 'Maximize',    enabled: !(isMax && !hidden),  click: maximizeWindow },
     { label: 'Minimize',    enabled: !hidden,              click: minimizeWindow },
     { label: 'Window mode', enabled: !(!isMax && !hidden), click: windowModeWindow },
+    { type: 'separator' },
+    { label: 'Move to corner', submenu: cornerItems() },
     { type: 'separator' },
     { label: 'Corner radius', submenu: radiusItems() },
     { label: 'Opacity',       submenu: opacityItems() },

@@ -9,7 +9,9 @@ it over whatever you're doing.
 ## Features
 
 - Borderless always-on-top webcam window, draggable and resizable
-- Right-click menu: Maximize / Minimize / Window mode / Corner radius / Opacity / Exit
+- Snap it to any of the four screen corners from the menu
+- Right-click menu: Maximize / Minimize / Window mode / Move to corner /
+  Corner radius / Opacity / Exit
 - System tray icon with the same menu
 - Global hotkeys — `Ctrl+Alt+M` (maximize ⇄ window), `Ctrl+Alt+W` (show / hide)
 - Configurable rounded corners, live-updating
@@ -35,6 +37,7 @@ npm start
 | | |
 |---|---|
 | Move | Drag anywhere on the window |
+| Snap to a screen corner | Right-click → Move to corner |
 | Resize | Drag the grip in the bottom-right corner |
 | Menu | Right-click the window, or the tray icon |
 | Show / hide | `Ctrl+Alt+W` |
@@ -55,12 +58,15 @@ you can always get back out. The app always launches in window mode.
   },
   "window": { "x": null, "y": null, "width": 320, "height": 240, "opacity": 0.95 },
   "corner_radius": 16,
+  "corner_margin": 24,
   "editor": null,
   "control_port": 28492
 }
 ```
 
 - `x`/`y` `null` — auto-place bottom-right on first launch
+- `corner_margin` — gap left between the window and the screen edge when snapping
+  to a corner
 - `editor` — `null` auto-detects VS Code → Notepad++ → Notepad for the
   "Edit config.json" menu item
 - `control_port` — loopback port for the Stream Deck plugin; `0` disables it

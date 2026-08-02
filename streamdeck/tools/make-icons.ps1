@@ -80,6 +80,23 @@ function Draw-Mode($g, [bool]$max, [System.Drawing.Color]$frame, [System.Drawing
   $inner.Dispose(); $brush.Dispose()
 }
 
+# Screen outline with a small window parked in one corner of it.
+function Draw-Corner($g, [string]$vert, [string]$horiz,
+                     [System.Drawing.Color]$frame, [System.Drawing.Color]$fill) {
+  $pen = New-Object System.Drawing.Pen $frame, 4
+  $outline = New-RoundedPath 6 12 60 44 5
+  $g.DrawPath($pen, $outline)
+  $outline.Dispose(); $pen.Dispose()
+
+  $x = if ($horiz -eq 'left') { 12 } else { 40 }
+  $y = if ($vert  -eq 'top')  { 18 } else { 36 }
+
+  $brush = New-Object System.Drawing.SolidBrush $fill
+  $box = New-RoundedPath $x $y 20 14 3
+  $g.FillPath($brush, $box)
+  $box.Dispose(); $brush.Dispose()
+}
+
 function Draw-Opacity($g) {
   $pen = New-Object System.Drawing.Pen $White, 4
   $g.DrawEllipse($pen, 12, 12, 48, 48)
@@ -151,6 +168,23 @@ $icons = @(
   @{ rel = 'imgs/actions/window/icon'; size = 20; draw = { param($g) Draw-Mode $g $false $FrameOn  $Accent } },
   @{ rel = 'imgs/actions/window/on';   size = 72; draw = { param($g) Draw-Mode $g $false $FrameOn  $Accent } },
   @{ rel = 'imgs/actions/window/off';  size = 72; draw = { param($g) Draw-Mode $g $false $FrameOff $DimGlyph } },
+
+  # Screen-corner presets - lit while the overlay is parked in that corner
+  @{ rel = 'imgs/actions/topleft/icon';     size = 20; draw = { param($g) Draw-Corner $g 'top' 'left' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/topleft/on';       size = 72; draw = { param($g) Draw-Corner $g 'top' 'left' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/topleft/off';      size = 72; draw = { param($g) Draw-Corner $g 'top' 'left' $FrameOff $DimGlyph } },
+
+  @{ rel = 'imgs/actions/topright/icon';    size = 20; draw = { param($g) Draw-Corner $g 'top' 'right' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/topright/on';      size = 72; draw = { param($g) Draw-Corner $g 'top' 'right' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/topright/off';     size = 72; draw = { param($g) Draw-Corner $g 'top' 'right' $FrameOff $DimGlyph } },
+
+  @{ rel = 'imgs/actions/bottomleft/icon';  size = 20; draw = { param($g) Draw-Corner $g 'bottom' 'left' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/bottomleft/on';    size = 72; draw = { param($g) Draw-Corner $g 'bottom' 'left' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/bottomleft/off';   size = 72; draw = { param($g) Draw-Corner $g 'bottom' 'left' $FrameOff $DimGlyph } },
+
+  @{ rel = 'imgs/actions/bottomright/icon'; size = 20; draw = { param($g) Draw-Corner $g 'bottom' 'right' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/bottomright/on';   size = 72; draw = { param($g) Draw-Corner $g 'bottom' 'right' $FrameOn  $Accent } },
+  @{ rel = 'imgs/actions/bottomright/off';  size = 72; draw = { param($g) Draw-Corner $g 'bottom' 'right' $FrameOff $DimGlyph } },
 
   @{ rel = 'imgs/actions/opacity/icon';    size = 20; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/key';     size = 72; draw = { param($g) Draw-Opacity $g } },
