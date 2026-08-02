@@ -57,6 +57,9 @@ const DEFAULT_CONFIG = {
 const MIN_OPACITY = 0.1;    // below this the window is invisible AND unclickable
 const MAX_RADIUS  = 200;
 
+// Registry value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
+const STARTUP_NAME = 'Webcam Overlay';
+
 // Text of the last config we wrote ourselves, so the file watcher can tell our
 // own saves apart from a real external edit.
 let lastWrittenConfig = null;
@@ -262,6 +265,45 @@ function openConfigInEditor() {
 }
 
 // ---------------------------------------------------------------------------
+// Start with Windows
+// ---------------------------------------------------------------------------
+
+// Windows stores this in HKCU\...\CurrentVersion\Run, so the OS is the source of
+// truth — deliberately not mirrored into config.json, which would let the two
+// disagree the moment someone edits the registry or the startup entry directly.
+function startupTarget() {
+  // Unpackaged, process.execPath is electron.exe itself. Launching that with no
+  // arguments opens Electron's default welcome window instead of this app, so the
+  // app directory has to be passed explicitly.
+  //
+  // `name` is the registry value under HKCU\...\Run. Without it an unpackaged app
+  // registers as "electron.app.Electron", which is both meaningless in Task
+  // Manager's Startup tab and liable to collide with any other unpackaged
+  // Electron app doing the same thing.
+  const target = { name: STARTUP_NAME };
+  return app.isPackaged
+    ? { ...target, path: process.execPath, args: [] }
+    : { ...target, path: process.execPath, args: [app.getAppPath()] };
+}
+
+function startsWithWindows() {
+  try {
+    return app.getLoginItemSettings(startupTarget()).openAtLogin;
+  } catch (_) {
+    return false;
+  }
+}
+
+function setStartWithWindows(enabled) {
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled, ...startupTarget() });
+    console.log(`Start with Windows: ${startsWithWindows() ? 'on' : 'off'}`);
+  } catch (e) {
+    console.error(`Could not change the startup setting: ${e.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Live reload of hand-edited config.json
 // ---------------------------------------------------------------------------
 
@@ -317,7 +359,8 @@ function currentState() {
     visible: !!win && !win.isDestroyed() && win.isVisible(),
     opacity: win && !win.isDestroyed() ? Math.round(win.getOpacity() * 100) / 100 : 1,
     radius:  cfg.corner_radius,
-    corner:  currentCorner()                         // corner key, or null
+    corner:  currentCorner(),                        // corner key, or null
+    startup: startsWithWindows()
   };
 }
 
@@ -345,6 +388,7 @@ function handleControlCommand(msg) {
     case 'setRadius':        setCornerRadius(msg.value); break;
     case 'nudgeRadius':      setCornerRadius(cfg.corner_radius + Number(msg.delta || 0)); break;
     case 'snapCorner':       snapToCorner(String(msg.corner)); break;
+    case 'setStartup':       setStartWithWindows(msg.enabled); break;
     case 'quit':             app.quit();             return;
     default:                 return;                 // unknown verb: ignore
   }
@@ -508,6 +552,14 @@ function buildMenuTemplate() {
     { label: `          ${hkVis} = show / hide`,        enabled: false },
     { type: 'separator' },
     { label: 'Edit config.json…', click: openConfigInEditor },
+    { type: 'separator' },
+    {
+      label:   'Start with Windows',
+      type:    'checkbox',
+      checked: startsWithWindows(),
+      // `item.checked` is already the post-click value.
+      click:   (item) => setStartWithWindows(item.checked)
+    },
     { type: 'separator' },
     { label: 'Exit', click: () => app.quit() }
   );

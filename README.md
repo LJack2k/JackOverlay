@@ -11,7 +11,7 @@ it over whatever you're doing.
 - Borderless always-on-top webcam window, draggable and resizable
 - Snap it to any of the four screen corners from the menu
 - Right-click menu: Maximize / Minimize / Window mode / Move to corner /
-  Corner radius / Opacity / Exit
+  Corner radius / Opacity / Start with Windows / Exit
 - System tray icon with the same menu
 - Global hotkeys — `Ctrl+Alt+M` (maximize ⇄ window), `Ctrl+Alt+W` (show / hide)
 - Configurable rounded corners, live-updating
@@ -45,6 +45,18 @@ npm start
 
 Maximize fills the display's **work area**, so the taskbar and tray stay reachable —
 you can always get back out. The app always launches in window mode.
+
+## Starting with Windows
+
+Right-click the overlay (or the tray icon) → tick **Start with Windows**.
+
+That writes a `Webcam Overlay` value to
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` pointing straight at
+`electron.exe` with the app directory as its argument — so it launches without a
+console window and without depending on `npm` or Node being on `PATH`. Untick it to
+remove the entry; it also shows up in Task Manager's Startup tab.
+
+The path is absolute, so **re-tick it if you move the project folder**.
 
 ## Configuration
 

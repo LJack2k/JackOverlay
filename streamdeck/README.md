@@ -90,6 +90,7 @@ Commands the plugin sends:
 | `setRadius` | `value` 0–200 | Absolute corner radius |
 | `nudgeRadius` | `delta` | Relative corner radius |
 | `snapCorner` | `corner` | Park in `top-left` / `top-right` / `bottom-left` / `bottom-right` |
+| `setStartup` | `enabled` | Launch the overlay at Windows login |
 | `quit` | — | Quit the overlay |
 
 Out-of-range values are clamped by the overlay, and unknown verbs are ignored
@@ -104,7 +105,8 @@ The overlay pushes this on connect and after every change:
   "visible": true,
   "opacity": 1,
   "radius": 16,
-  "corner": "bottom-right"
+  "corner": "bottom-right",
+  "startup": true
 }
 ```
 
