@@ -10,8 +10,10 @@ it over whatever you're doing.
 
 - Borderless always-on-top webcam window, draggable and resizable
 - Snap it to any of the four screen corners from the menu
+- **Settings window** — pick your webcam, and adjust everything else without
+  touching a config file
 - Right-click menu: Maximize / Minimize / Window mode / Move to corner /
-  Corner radius / Opacity / Start with Windows / Exit
+  Corner radius / Opacity / Settings / Start with Windows / Exit
 - System tray icon with the same menu
 - Global hotkeys — `Ctrl+Alt+M` (maximize ⇄ window), `Ctrl+Alt+W` (show / hide)
 - Configurable rounded corners, live-updating
@@ -46,6 +48,24 @@ npm start
 Maximize fills the display's **work area**, so the taskbar and tray stay reachable —
 you can always get back out. The app always launches in window mode.
 
+## Settings
+
+Right-click the overlay (or the tray icon) → **Settings…**
+
+| Section | What's there |
+|---|---|
+| **Camera** | Dropdown of every connected webcam. A saved camera that's currently unplugged stays listed as *not connected* rather than silently switching. |
+| **Appearance** | Opacity and corner radius sliders, applied as you drag. |
+| **Position & size** | The four corner presets, width/height, and the corner margin. |
+| **Hotkeys** | Both accelerators, each with an **active** / **taken** badge showing whether it actually registered. |
+| **System** | Start with Windows, config editor, control port. |
+
+Everything applies immediately and is written to `config.json`. The window also
+stays in sync the other way — change something from the tray, a hotkey or the
+Stream Deck and the settings screen updates live.
+
+**Open config.json** in the footer still opens the raw file in your editor.
+
 ## Starting with Windows
 
 Right-click the overlay (or the tray icon) → tick **Start with Windows**.
@@ -71,6 +91,8 @@ The path is absolute, so **re-tick it if you move the project folder**.
   "window": { "x": null, "y": null, "width": 320, "height": 240, "opacity": 0.95 },
   "corner_radius": 16,
   "corner_margin": 24,
+  "camera_id": null,
+  "camera_label": null,
   "editor": null,
   "control_port": 28492
 }
@@ -79,6 +101,8 @@ The path is absolute, so **re-tick it if you move the project folder**.
 - `x`/`y` `null` — auto-place bottom-right on first launch
 - `corner_margin` — gap left between the window and the screen edge when snapping
   to a corner
+- `camera_id` — `null` uses the system default. `camera_label` is kept alongside it
+  so the right camera can still be found if the device id changes
 - `editor` — `null` auto-detects VS Code → Notepad++ → Notepad for the
   "Edit config.json" menu item
 - `control_port` — loopback port for the Stream Deck plugin; `0` disables it

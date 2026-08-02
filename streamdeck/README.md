@@ -91,6 +91,8 @@ Commands the plugin sends:
 | `nudgeRadius` | `delta` | Relative corner radius |
 | `snapCorner` | `corner` | Park in `top-left` / `top-right` / `bottom-left` / `bottom-right` |
 | `setStartup` | `enabled` | Launch the overlay at Windows login |
+| `setCamera` | `id` or `label` | Switch webcam. `label` matches case-insensitively on a substring, which is far more usable than an opaque device id; no argument means the system default |
+| `openSettings` | — | Open the settings window |
 | `quit` | — | Quit the overlay |
 
 Out-of-range values are clamped by the overlay, and unknown verbs are ignored

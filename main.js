@@ -46,6 +46,10 @@ const DEFAULT_CONFIG = {
   corner_radius: 16,
   // Gap left between the window and the screen edge when snapping to a corner.
   corner_margin: 24,
+  // Chosen webcam. The id is what actually selects the device; the label is kept
+  // so the right camera can be found again if Chromium reissues device ids.
+  camera_id: null,
+  camera_label: null,
   // Command or absolute path used by "Edit config.json".
   // null = auto-detect (VS Code, then Notepad++, then Notepad).
   editor: null,
@@ -59,6 +63,7 @@ const MAX_RADIUS  = 200;
 
 // Registry value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
 const STARTUP_NAME = 'Webcam Overlay';
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 
 // Text of the last config we wrote ourselves, so the file watcher can tell our
 // own saves apart from a real external edit.
@@ -123,6 +128,17 @@ let windowedBounds = null;
 // Start bounds for an in-progress renderer-driven move/resize.
 let dragOrigin = null;
 
+// Settings window, and the data it renders.
+let settingsWin = null;
+
+// Video inputs, as reported by the overlay renderer. Enumerated there rather than
+// here because device *labels* are only exposed to a context that has been granted
+// camera permission, and the overlay is the context that asked for it.
+let cameras = [];
+
+// Which hotkeys actually registered, so the settings screen can say so.
+let hotkeyStatus = {};
+
 // ---------------------------------------------------------------------------
 // Bounds persistence
 // ---------------------------------------------------------------------------
@@ -135,6 +151,9 @@ function saveBounds() {
   cfg.window.width  = b.width;
   cfg.window.height = b.height;
   saveConfig(cfg);
+  // Moving or resizing can take the window out of a corner, so controllers need
+  // to hear about it too — otherwise a corner button stays lit after a drag.
+  broadcastState();
 }
 
 // ---------------------------------------------------------------------------
@@ -287,10 +306,19 @@ function startupTarget() {
 }
 
 function startsWithWindows() {
+  if (process.platform !== 'win32') {
+    try { return app.getLoginItemSettings().openAtLogin; } catch (_) { return false; }
+  }
+  // setLoginItemSettings() accepts a `name` for the registry value, but
+  // LoginItemSettingsOptions — what getLoginItemSettings() takes — has no such
+  // field, so it would go looking for the default "electron.app.Electron"
+  // instead and always report false. Read back the value we actually wrote.
   try {
-    return app.getLoginItemSettings(startupTarget()).openAtLogin;
+    execFileSync('reg', ['query', RUN_KEY, '/v', STARTUP_NAME],
+                 { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    return true;
   } catch (_) {
-    return false;
+    return false;   // reg exits non-zero when the value does not exist
   }
 }
 
@@ -329,6 +357,7 @@ function reloadConfigFromDisk() {
 
   win.setOpacity(cfg.window.opacity);
   applyCornerRadius();
+  win.webContents.send('set-camera', cfg.camera_id);
 
   if (JSON.stringify(cfg.hotkeys) !== prevHotkeys) {
     globalShortcut.unregisterAll();
@@ -367,10 +396,10 @@ function currentState() {
 // Coalesced: one mutation often touches several setters (maximize also shows),
 // and controllers only care about the settled result.
 function broadcastState() {
-  if (!control) return;
   clearTimeout(stateTimer);
   stateTimer = setTimeout(() => {
-    control.broadcast({ event: 'state', ...currentState() });
+    if (control) control.broadcast({ event: 'state', ...currentState() });
+    pushSettings();
   }, 20);
 }
 
@@ -389,6 +418,8 @@ function handleControlCommand(msg) {
     case 'nudgeRadius':      setCornerRadius(cfg.corner_radius + Number(msg.delta || 0)); break;
     case 'snapCorner':       snapToCorner(String(msg.corner)); break;
     case 'setStartup':       setStartWithWindows(msg.enabled); break;
+    case 'openSettings':     openSettings();         break;
+    case 'setCamera':        selectCamera(msg);      break;
     case 'quit':             app.quit();             return;
     default:                 return;                 // unknown verb: ignore
   }
@@ -500,6 +531,140 @@ function toggleVisibility() {
 }
 
 // ---------------------------------------------------------------------------
+// Camera selection
+// ---------------------------------------------------------------------------
+
+// Control-channel camera picker. Accepts a device id, or a case-insensitive
+// substring of the label — ids are opaque hashes, so a label is far more usable
+// from a script or a Stream Deck button. No argument means the system default.
+function selectCamera(msg) {
+  if (msg.id) {
+    const byId = cameras.find((c) => c.deviceId === msg.id);
+    if (byId) setCamera(byId.deviceId, byId.label);
+    return;
+  }
+  if (msg.label) {
+    const needle = String(msg.label).toLowerCase();
+    const byLabel = cameras.find((c) => (c.label || '').toLowerCase().includes(needle));
+    if (byLabel) setCamera(byLabel.deviceId, byLabel.label);
+    return;
+  }
+  setCamera(null, null);
+}
+
+function setCamera(id, label) {
+  cfg.camera_id    = id    || null;
+  cfg.camera_label = label || null;
+  saveConfig(cfg);
+  if (win && !win.isDestroyed()) win.webContents.send('set-camera', cfg.camera_id);
+  pushSettings();
+}
+
+// ---------------------------------------------------------------------------
+// Settings window
+// ---------------------------------------------------------------------------
+
+function settingsSnapshot() {
+  return {
+    config:     cfg,
+    cameras,
+    startup:    startsWithWindows(),
+    hotkeyOk:   hotkeyStatus,
+    configPath: CONFIG_PATH,
+    editor:     resolveEditor(),
+    bounds:     win && !win.isDestroyed() ? win.getBounds() : null,
+    corner:     currentCorner(),
+    mode
+  };
+}
+
+function pushSettings() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.webContents.send('settings', settingsSnapshot());
+  }
+}
+
+function openSettings() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show();
+    settingsWin.focus();
+    return;
+  }
+
+  settingsWin = new BrowserWindow({
+    width: 580, height: 880,
+    minWidth: 460, minHeight: 460,
+    title: 'Webcam Overlay — Settings',
+    backgroundColor: '#1e2126',
+    autoHideMenuBar: true,
+    // The overlay is alwaysOnTop; without this the settings window would open
+    // behind it and look like nothing happened.
+    alwaysOnTop: true,
+    webPreferences: {
+      preload:          path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration:  false
+    }
+  });
+
+  settingsWin.setMenuBarVisibility(false);
+  settingsWin.loadFile('settings.html');
+  settingsWin.on('closed', () => { settingsWin = null; });
+}
+
+/**
+ * Applies a partial settings change from the settings window. Everything routes
+ * through the same setters the menus use, so there is one code path per setting
+ * and the two interfaces cannot drift apart.
+ */
+function applySettings(patch) {
+  if (!patch || typeof patch !== 'object') return;
+
+  if ('opacity'       in patch) setOpacity(patch.opacity);
+  if ('corner_radius' in patch) setCornerRadius(patch.corner_radius);
+  if ('startup'       in patch) setStartWithWindows(patch.startup);
+  if ('corner'        in patch) snapToCorner(String(patch.corner));
+  if ('camera_id'     in patch) setCamera(patch.camera_id, patch.camera_label);
+
+  if ('corner_margin' in patch) {
+    cfg.corner_margin = Math.round(clamp(patch.corner_margin, 0, 400));
+    saveConfig(cfg);
+  }
+
+  if ('width' in patch || 'height' in patch) {
+    const b = win.getBounds();
+    win.setBounds({
+      x: b.x, y: b.y,
+      width:  Math.round(clamp(patch.width  ?? b.width,  MIN_W, 4096)),
+      height: Math.round(clamp(patch.height ?? b.height, MIN_H, 4096))
+    });
+    saveBounds();
+  }
+
+  if ('editor' in patch) {
+    cfg.editor = patch.editor || null;
+    cachedEditor = undefined;              // re-resolve on next use
+    saveConfig(cfg);
+  }
+
+  if ('control_port' in patch) {
+    // Bound once at startup, so this one genuinely needs a restart.
+    cfg.control_port = Math.round(clamp(patch.control_port, 0, 65535));
+    saveConfig(cfg);
+  }
+
+  if ('hotkeys' in patch) {
+    cfg.hotkeys = { ...cfg.hotkeys, ...patch.hotkeys };
+    saveConfig(cfg);
+    globalShortcut.unregisterAll();
+    registerHotkeys();
+  }
+
+  broadcastState();
+  pushSettings();
+}
+
+// ---------------------------------------------------------------------------
 // Shared menu (used by both the window right-click menu and the tray menu)
 // ---------------------------------------------------------------------------
 
@@ -551,7 +716,7 @@ function buildMenuTemplate() {
     { label: `Hotkeys:  ${hkMax} = maximize / window`, enabled: false },
     { label: `          ${hkVis} = show / hide`,        enabled: false },
     { type: 'separator' },
-    { label: 'Edit config.json…', click: openConfigInEditor },
+    { label: 'Settings…', click: openSettings },
     { type: 'separator' },
     {
       label:   'Start with Windows',
@@ -618,16 +783,20 @@ function createWindow() {
 
 function registerHotkeys() {
   const wanted = [
-    [cfg.hotkeys.toggle_visibility, toggleVisibility, 'show / hide'],
-    [cfg.hotkeys.toggle_maximize,   toggleMaximize,   'maximize / window mode']
+    ['toggle_visibility', cfg.hotkeys.toggle_visibility, toggleVisibility, 'show / hide'],
+    ['toggle_maximize',   cfg.hotkeys.toggle_maximize,   toggleMaximize,   'maximize / window mode']
   ];
 
-  for (const [accel, handler, what] of wanted) {
+  hotkeyStatus = {};
+
+  for (const [name, accel, handler, what] of wanted) {
     let ok = false;
     try { ok = globalShortcut.register(accel, handler); } catch (e) {
+      hotkeyStatus[name] = false;
       console.error(`  hotkey ${accel} (${what}) — invalid accelerator: ${e.message}`);
       continue;
     }
+    hotkeyStatus[name] = ok;
     if (ok) {
       console.log(`  ${accel} — ${what}`);
     } else {
@@ -663,6 +832,21 @@ ipcMain.handle('show-context-menu', () => {
 });
 
 ipcMain.handle('get-config', () => cfg);
+
+// The overlay renderer owns camera enumeration (it holds the permission that
+// makes device labels visible) and reports the list up for the settings window.
+ipcMain.on('cameras-reported', (_e, list) => {
+  cameras = Array.isArray(list) ? list : [];
+  console.log(`  cameras: ${cameras.map((c) => c.label || c.deviceId).join(' | ') || 'none'}`);
+  pushSettings();
+});
+
+// ---- settings window -------------------------------------------------------
+
+ipcMain.handle('settings:get',        () => settingsSnapshot());
+ipcMain.handle('settings:apply',      (_e, patch) => { applySettings(patch); return settingsSnapshot(); });
+ipcMain.handle('settings:openConfig', () => openConfigInEditor());
+ipcMain.on('settings:close',          () => { if (settingsWin) settingsWin.close(); });
 
 // Renderer-driven move/resize. index.html can't use -webkit-app-region: drag,
 // because on Windows a drag region swallows right-click before it reaches the

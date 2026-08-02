@@ -97,21 +97,50 @@
   window.api.onCornerRadius(applyRadius);
 
   // ---- Webcam ------------------------------------------------------------
-  async function startCamera(deviceId) {
+  let stream = null;
+
+  function stopStream() {
+    if (!stream) return;
+    // Release the device, or switching cameras can fail with the old one still open.
+    for (const track of stream.getTracks()) track.stop();
+    stream = null;
+  }
+
+  async function startCamera(deviceId, allowFallback = true) {
+    stopStream();
     try {
       const constraints = deviceId
         ? { video: { deviceId: { exact: deviceId } }, audio: false }
         : { video: true, audio: false };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream;
       error.style.display = 'none';
       video.style.display = 'block';
     } catch (e) {
+      // A saved camera that has since been unplugged shouldn't leave a dead
+      // overlay — fall back to whatever camera is available.
+      if (deviceId && allowFallback) return startCamera(null, false);
       video.style.display = 'none';
       error.style.display = 'flex';
       error.textContent = `Camera error: ${e.message}`;
     }
   }
+
+  // Labels are only populated once camera permission has been granted, so this
+  // has to run after the first successful getUserMedia.
+  async function reportCameras() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      window.api.reportCameras(
+        devices
+          .filter((d) => d.kind === 'videoinput')
+          .map((d) => ({ deviceId: d.deviceId, label: d.label }))
+      );
+    } catch (_) {}
+  }
+
+  window.api.onSetCamera((id) => startCamera(id));
+  navigator.mediaDevices.addEventListener('devicechange', reportCameras);
 
   // ---- Move / resize ----------------------------------------------------
   // Absolute offsets from the grab point, so the window can't drift.
@@ -157,11 +186,13 @@
   // before wiring the listeners above left right-click (and dragging) dead
   // until the camera came up — the menu looked broken on every cold start.
   (async () => {
+    let cfg = null;
     try {
-      const cfg = await window.api.getConfig();
+      cfg = await window.api.getConfig();
       applyRadius(cfg.corner_radius);
     } catch (_) {}
-    await startCamera();
+    await startCamera(cfg?.camera_id ?? null);
+    await reportCameras();
   })();
 })();
 </script>

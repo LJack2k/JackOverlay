@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('api', {
   // Live corner-radius updates pushed from the main process
   onCornerRadius:  (cb)     => ipcRenderer.on('corner-radius', (_e, px) => cb(px)),
 
+  // Camera list / selection
+  reportCameras:   (list)   => ipcRenderer.send('cameras-reported', list),
+  onSetCamera:     (cb)     => ipcRenderer.on('set-camera', (_e, id) => cb(id)),
+
   // Window move / resize, driven from the renderer (see index.html)
   moveStart:       ()       => ipcRenderer.send('move-start'),
   moveBy:          (dx, dy) => ipcRenderer.send('move-by',   { dx, dy }),

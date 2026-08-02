@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Webcam Overlay — Settings</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:      #1e2126;
+    --panel:   #262a31;
+    --line:    #343943;
+    --text:    #dfe3e8;
+    --muted:   #8b939f;
+    --accent:  #4aa3ff;
+    --danger:  #ff5f56;
+    --ok:      #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font: 13px/1.5 "Segoe UI", system-ui, sans-serif;
+    color: var(--text); background: var(--bg);
+  }
+  main { padding: 18px 20px 90px; }
+
+  h2 {
+    font-size: 11px; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--muted);
+    margin: 26px 0 10px;
+  }
+  h2:first-child { margin-top: 0; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px 14px;
+  }
+  .row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .row:last-child { border-bottom: none; }
+  .row label.name { flex: 1; min-width: 0; }
+  .row .sub { display: block; color: var(--muted); font-size: 11.5px; }
+
+  input[type="text"], input[type="number"], select {
+    background: #1a1d22; color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 8px; font: inherit; min-width: 0;
+  }
+  input[type="text"], select { width: 236px; }
+  input[type="number"] { width: 92px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  input.bad { border-color: var(--danger); }
+
+  input[type="range"] { width: 190px; accent-color: var(--accent); }
+  input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+
+  .val { width: 54px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .corners { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 236px; }
+  button {
+    background: #30353d; color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 7px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #3a4049; }
+  button.on { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+
+  .note { color: var(--muted); font-size: 11.5px; margin: 8px 2px 0; }
+  .pill {
+    font-size: 10.5px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill.ok   { color: var(--ok);     border-color: #24502f; }
+  .pill.bad  { color: var(--danger); border-color: #5c2b28; }
+
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px;
+    background: #1a1d22; border-top: 1px solid var(--line);
+  }
+  footer .path {
+    flex: 1; min-width: 0; color: var(--muted); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  code { background: #14171b; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<main>
+
+  <h2>Camera</h2>
+  <div class="panel">
+    <div class="row">
+      <label class="name" for="camera">
+        Webcam
+        <span class="sub" id="cameraNote">Choose which camera the overlay shows.</span>
+      </label>
+      <select id="camera"></select>
+    </div>
+  </div>
+
+  <h2>Appearance</h2>
+  <div class="panel">
+    <div class="row">
+      <label class="name" for="opacity">Opacity</label>
+      <input type="range" id="opacity" min="10" max="100" step="5">
+      <span class="val" id="opacityVal"></span>
+    </div>
+    <div class="row">
+      <label class="name" for="radius">Corner radius</label>
+      <input type="range" id="radius" min="0" max="80" step="1">
+      <span class="val" id="radiusVal"></span>
+    </div>
+  </div>
+
+  <h2>Position &amp; size</h2>
+  <div class="panel">
+    <div class="row">
+      <label class="name">
+        Move to corner
+        <span class="sub" id="cornerNote"></span>
+      </label>
+      <div class="corners">
+        <button data-corner="top-left">Top left</button>
+        <button data-corner="top-right">Top right</button>
+        <button data-corner="bottom-left">Bottom left</button>
+        <button data-corner="bottom-right">Bottom right</button>
+      </div>
+    </div>
+    <div class="row">
+      <label class="name" for="width">Size <span class="sub">width × height, in pixels</span></label>
+      <input type="number" id="width" min="160" max="4096" step="1">
+      <input type="number" id="height" min="120" max="4096" step="1">
+    </div>
+    <div class="row">
+      <label class="name" for="margin">Corner margin <span class="sub">gap from the screen edge</span></label>
+      <input type="number" id="margin" min="0" max="400" step="1">
+    </div>
+  </div>
+
+  <h2>Hotkeys</h2>
+  <div class="panel">
+    <div class="row">
+      <label class="name" for="hkShow">
+        Show / hide
+        <span class="sub">Electron accelerator, e.g. <code>CommandOrControl+Alt+W</code></span>
+      </label>
+      <span class="pill" id="hkShowState"></span>
+      <input type="text" id="hkShow" spellcheck="false">
+    </div>
+    <div class="row">
+      <label class="name" for="hkMax">Maximize / window mode</label>
+      <span class="pill" id="hkMaxState"></span>
+      <input type="text" id="hkMax" spellcheck="false">
+    </div>
+  </div>
+  <p class="note">
+    A hotkey already owned by another application will fail to register and show
+    as <b>taken</b>. Changes apply as soon as the field loses focus.
+  </p>
+
+  <h2>System</h2>
+  <div class="panel">
+    <div class="row">
+      <label class="name" for="startup">
+        Start with Windows
+        <span class="sub">Adds a “Webcam Overlay” entry to your startup apps</span>
+      </label>
+      <input type="checkbox" id="startup">
+    </div>
+    <div class="row">
+      <label class="name" for="editor">
+        Config editor
+        <span class="sub" id="editorNote"></span>
+      </label>
+      <input type="text" id="editor" placeholder="auto-detect" spellcheck="false">
+    </div>
+    <div class="row">
+      <label class="name" for="port">
+        Control port
+        <span class="sub">Used by the Stream Deck plugin — needs a restart</span>
+      </label>
+      <input type="number" id="port" min="0" max="65535" step="1">
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <span class="path" id="configPath"></span>
+  <button id="openConfig">Open config.json</button>
+  <button id="close">Close</button>
+</footer>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  // Guards against the "settings" push echoing back as a change event while the
+  // user is mid-edit, which would fight the caret in text fields.
+  let loading = false;
+  let snap = null;
+
+  const apply = (patch) => window.settings.apply(patch);
+
+  function render(s) {
+    snap = s;
+    loading = true;
+    const c = s.config;
+
+    // Camera
+    const sel = $('camera');
+    sel.innerHTML = '';
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = 'System default';
+    sel.appendChild(def);
+
+    for (const cam of s.cameras) {
+      const o = document.createElement('option');
+      o.value = cam.deviceId;
+      o.textContent = cam.label || 'Camera ' + (cam.deviceId || '').slice(0, 6);
+      sel.appendChild(o);
+    }
+
+    const known = s.cameras.some((cam) => cam.deviceId === c.camera_id);
+    if (c.camera_id && !known) {
+      // Saved camera isn't plugged in; keep it visible rather than silently
+      // snapping the dropdown to something the user didn't choose.
+      const o = document.createElement('option');
+      o.value = c.camera_id;
+      o.textContent = (c.camera_label || 'Saved camera') + ' — not connected';
+      sel.appendChild(o);
+    }
+    sel.value = c.camera_id || '';
+    $('cameraNote').textContent = s.cameras.length
+      ? 'Choose which camera the overlay shows.'
+      : 'No cameras detected yet.';
+
+    // Appearance
+    $('opacity').value = Math.round((c.window.opacity ?? 1) * 100);
+    $('opacityVal').textContent = $('opacity').value + '%';
+    $('radius').value = c.corner_radius ?? 16;
+    $('radiusVal').textContent = $('radius').value + ' px';
+
+    // Position & size
+    for (const b of document.querySelectorAll('[data-corner]')) {
+      b.classList.toggle('on', s.corner === b.dataset.corner && s.mode === 'windowed');
+    }
+    $('cornerNote').textContent =
+      s.mode === 'maximized' ? 'Currently maximized — this will restore it first.'
+      : s.corner            ? 'Currently in the ' + s.corner.replace('-', ' ') + ' corner.'
+                            : 'Not in a corner right now.';
+    if (s.bounds) {
+      $('width').value  = s.bounds.width;
+      $('height').value = s.bounds.height;
+    }
+    $('margin').value = c.corner_margin ?? 24;
+
+    // Hotkeys
+    $('hkShow').value = c.hotkeys.toggle_visibility || '';
+    $('hkMax').value  = c.hotkeys.toggle_maximize   || '';
+    for (const [id, key] of [['hkShowState', 'toggle_visibility'], ['hkMaxState', 'toggle_maximize']]) {
+      const ok = s.hotkeyOk?.[key];
+      const el = $(id);
+      el.textContent = ok ? 'active' : 'taken';
+      el.className = 'pill ' + (ok ? 'ok' : 'bad');
+    }
+
+    // System
+    $('startup').checked = !!s.startup;
+    $('editor').value = c.editor || '';
+    $('editorNote').textContent = 'Blank auto-detects — currently ' + (s.editor || 'Notepad');
+    $('port').value = c.control_port ?? 0;
+    $('configPath').textContent = s.configPath;
+
+    loading = false;
+  }
+
+  // --- wiring ---------------------------------------------------------------
+
+  $('camera').addEventListener('change', (e) => {
+    if (loading) return;
+    const opt = e.target.selectedOptions[0];
+    apply({ camera_id: e.target.value || null, camera_label: e.target.value ? opt.textContent : null });
+  });
+
+  $('opacity').addEventListener('input', (e) => {
+    $('opacityVal').textContent = e.target.value + '%';
+    if (!loading) apply({ opacity: Number(e.target.value) / 100 });
+  });
+
+  $('radius').addEventListener('input', (e) => {
+    $('radiusVal').textContent = e.target.value + ' px';
+    if (!loading) apply({ corner_radius: Number(e.target.value) });
+  });
+
+  for (const b of document.querySelectorAll('[data-corner]')) {
+    b.addEventListener('click', () => apply({ corner: b.dataset.corner }));
+  }
+
+  const onCommit = (el, build) => {
+    const fire = () => { if (!loading) apply(build(el.value)); };
+    el.addEventListener('change', fire);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
+  };
+
+  onCommit($('width'),  (v) => ({ width:  Number(v) }));
+  onCommit($('height'), (v) => ({ height: Number(v) }));
+  onCommit($('margin'), (v) => ({ corner_margin: Number(v) }));
+  onCommit($('port'),   (v) => ({ control_port: Number(v) }));
+  onCommit($('editor'), (v) => ({ editor: v.trim() || null }));
+  onCommit($('hkShow'), (v) => ({ hotkeys: { toggle_visibility: v.trim() } }));
+  onCommit($('hkMax'),  (v) => ({ hotkeys: { toggle_maximize:   v.trim() } }));
+
+  $('startup').addEventListener('change', (e) => {
+    if (!loading) apply({ startup: e.target.checked });
+  });
+
+  $('openConfig').addEventListener('click', () => window.settings.openConfig());
+  $('close').addEventListener('click', () => window.settings.close());
+
+  window.settings.onChange((s) => {
+    // Don't yank a field the user is typing in.
+    const active = document.activeElement;
+    const typing = active && (active.tagName === 'INPUT' && active.type === 'text');
+    if (typing) { snap = s; return; }
+    render(s);
+  });
+
+  window.settings.get().then(render);
+})();
+</script>
+</body>
+</html>
