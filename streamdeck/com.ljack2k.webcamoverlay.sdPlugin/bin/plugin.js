@@ -5,15 +5,19 @@ const DEFAULT_PORT = 28492;
 
 const overlay = new OverlayClient(DEFAULT_PORT);
 
-// Every visible action re-renders on any state change or a disconnect, so the
-// keys can never show something the overlay isn't actually doing.
-const rendered = new Set();
+// Every registered action. `this.actions` already yields only the *visible*
+// instances of an action, so there is no need to track appearances separately —
+// and doing so previously meant one key disappearing stopped its siblings from
+// updating.
+const allActions = [];
 
-// Registered dedicated-state buttons, used for the "lit:" diagnostic below.
-// Handy when a key looks wrong: the log says what the plugin thinks is true.
-const stateButtons = [];
+// Per-instance settings, keyed by action instance id. Both onWillAppear and
+// onDidReceiveSettings carry them, which keeps render() synchronous — getSettings()
+// is async and would race the state pushes.
+const instanceSettings = new Map();
+
 function renderAll() {
-	for (const a of rendered) {
+	for (const a of allActions) {
 		try {
 			a.render();
 		} catch (e) {
@@ -21,30 +25,99 @@ function renderAll() {
 		}
 	}
 }
+
+/** Overlay list from the last state push, newest first entry = primary. */
+function overlayList() {
+	return overlay.state?.overlays ?? [];
+}
+
 overlay.on("state", (s) => {
-	const lit = stateButtons
-		.filter((b) => b.config.active(s))
-		.map((b) => b.manifestId.split(".").pop());
-	streamDeck.logger.debug(
-		`overlay state: mode=${s.mode} visible=${s.visible} opacity=${s.opacity} ` +
-			`radius=${s.radius} | lit: ${lit.join(", ") || "none"}`,
-	);
+	const names = (s.overlays ?? []).map((o) => `${o.id}${o.visible ? "" : "(hidden)"}`);
+	streamDeck.logger.debug(`overlay state: ${names.join(", ") || "none"}`);
 	renderAll();
+	publishOverlaysToUI();
 });
+
 overlay.on("disconnected", () => {
 	streamDeck.logger.info("overlay disconnected");
 	renderAll();
+	publishOverlaysToUI();
 });
 
-/** Shared plumbing: track visible actions and re-render them on state changes. */
+/**
+ * Keeps an open property inspector's overlay dropdown current. Safe to call
+ * unconditionally — sendToPropertyInspector is a no-op when none is visible.
+ */
+function publishOverlaysToUI() {
+	streamDeck.ui
+		.sendToPropertyInspector({
+			event: "overlays",
+			connected: overlay.connected,
+			overlays: overlayList().map((o) => ({ id: o.id, name: o.name })),
+		})
+		.catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Shared plumbing
+// ---------------------------------------------------------------------------
+
 class OverlayAction extends SingletonAction {
-	onWillAppear() {
-		rendered.add(this);
+	onWillAppear(ev) {
+		instanceSettings.set(ev.action.id, ev.payload?.settings ?? {});
 		this.render();
 	}
 
-	onWillDisappear() {
-		rendered.delete(this);
+	onWillDisappear(ev) {
+		instanceSettings.delete(ev.action.id);
+	}
+
+	onDidReceiveSettings(ev) {
+		instanceSettings.set(ev.action.id, ev.payload?.settings ?? {});
+		// Immediate confirmation that a target picked in the property inspector
+		// actually landed — the quickest way to diagnose a key acting on the
+		// wrong window.
+		const target = this.targetOf(ev.action);
+		streamDeck.logger.info(
+			`${this.manifestId} now targets ${target ?? "the primary overlay"}`,
+		);
+		this.render();
+	}
+
+	/** Overlay id this key targets, or null for "whichever is primary". */
+	targetOf(action) {
+		const s = instanceSettings.get(action.id);
+		const id = s && typeof s.overlay === "string" ? s.overlay.trim() : "";
+		return id || null;
+	}
+
+	/** The overlay this key should reflect, or null if it isn't there. */
+	stateOf(action) {
+		const list = overlayList();
+		if (!list.length) return null;
+		const id = this.targetOf(action);
+		return id ? list.find((o) => o.id === id) ?? null : list[0];
+	}
+
+	/** Adds the target to a command payload, omitting it for the primary overlay. */
+	argsFor(action, extra = {}) {
+		const id = this.targetOf(action);
+		return id ? { ...extra, overlay: id } : { ...extra };
+	}
+
+	/**
+	 * "offline" when the overlay app isn't running, "missing" when this key points
+	 * at an overlay that has since been removed — otherwise blank, so a key never
+	 * silently does nothing.
+	 */
+	statusTitle(action) {
+		if (!overlay.connected) return "offline";
+		if (!this.stateOf(action)) return "missing";
+		return "";
+	}
+
+	async fail(action) {
+		await action.showAlert();
 	}
 
 	/** Overridden by each action. */
@@ -56,14 +129,13 @@ class OverlayAction extends SingletonAction {
 // ---------------------------------------------------------------------------
 
 /**
- * A button that puts the overlay into one specific state, and is lit while the
- * overlay is CURRENTLY in that state — so the key reports what is true now
- * rather than what pressing it would do.
+ * A button that puts one overlay into one specific state, and is lit while that
+ * overlay is CURRENTLY in that state — so the key reports what is true now rather
+ * than what pressing it would do.
  *
- * Each of these declares `DisableAutomaticStates: true` in the manifest. Without
- * it Stream Deck flips a two-state key's image on every press by itself, so
- * pressing "Show" while already visible would darken the key even though nothing
- * changed. State here is owned entirely by the overlay.
+ * Each declares `DisableAutomaticStates: true` in the manifest. Without it Stream
+ * Deck flips a two-state key's image on every press by itself, so pressing "Show"
+ * while already visible would darken the key even though nothing changed.
  */
 class StateButton extends OverlayAction {
 	/**
@@ -75,18 +147,18 @@ class StateButton extends OverlayAction {
 	 */
 	config = null;
 
-	async onKeyDown() {
-		if (!overlay.send(this.config.cmd, this.config.args)) {
-			for (const a of this.actions) await a.showAlert();
-		}
+	async onKeyDown(ev) {
+		const sent = overlay.send(this.config.cmd, this.argsFor(ev.action, this.config.args));
+		if (!sent) await this.fail(ev.action);
 	}
 
 	render() {
-		const lit = overlay.connected && this.config.active(overlay.state);
 		for (const a of this.actions) {
 			if (!a.isKey()) continue;
+			const st = this.stateOf(a);
+			const lit = overlay.connected && st && this.config.active(st);
 			a.setState(lit ? 1 : 0);
-			a.setTitle(overlay.connected ? "" : "offline");
+			a.setTitle(this.statusTitle(a));
 		}
 	}
 }
@@ -114,9 +186,9 @@ class WindowMode extends StateButton {
 }
 
 /**
- * Parks the overlay in one screen corner. The overlay reports which corner it is
- * currently in (or null once it has been dragged somewhere else), so these light
- * up the same way the mode buttons do.
+ * Parks an overlay in one screen corner. The overlay reports which corner it is
+ * currently in (or null once it has been dragged elsewhere), so these light up
+ * the same way the mode buttons do.
  */
 class CornerButton extends StateButton {
 	constructor(id, corner) {
@@ -142,9 +214,9 @@ const CORNER_BUTTONS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Base for the two knob actions. Both work on a plain keypad (press cycles
- * through presets) and on a Stream Deck + dial (rotate to adjust, push to reset),
- * so the same action is useful on either device.
+ * Base for the two knob actions. Both work on a plain keypad (press cycles through
+ * presets) and on a Stream Deck + dial (rotate to adjust, push to reset), so the
+ * same action is useful on either device.
  */
 class KnobAction extends OverlayAction {
 	/**
@@ -156,44 +228,54 @@ class KnobAction extends OverlayAction {
 	config = null;
 
 	async onDialRotate(ev) {
-		const step = this.config.step * (ev.payload.ticks ?? 0);
-		if (!overlay.send(this.config.nudge, { delta: step })) await this.#offline();
-	}
-
-	async onDialDown() {
-		if (!overlay.send(this.config.set, { value: this.config.reset })) await this.#offline();
-	}
-
-	async onTouchTap() {
-		await this.onDialDown();
-	}
-
-	/** Keypad fallback: step through the presets. */
-	async onKeyDown() {
-		const cur = this.value();
-		const presets = this.config.presets;
-		// Pick the next preset strictly above the current value, wrapping around.
-		const next = presets.find((p) => p > cur + 1e-6) ?? presets[0];
-		if (!overlay.send(this.config.set, { value: next })) await this.#offline();
-	}
-
-	render() {
-		const connected = overlay.connected;
-		for (const a of this.actions) {
-			if (a.isKey()) {
-				a.setTitle(connected ? this.label() : "offline");
-			} else {
-				a.setFeedback({
-					title: this.config.title,
-					value: connected ? this.label() : "offline",
-					indicator: { value: connected ? this.percent() : 0 },
-				});
-			}
+		const delta = this.config.step * (ev.payload.ticks ?? 0);
+		if (!overlay.send(this.config.nudge, this.argsFor(ev.action, { delta }))) {
+			await this.fail(ev.action);
 		}
 	}
 
-	async #offline() {
-		for (const a of this.actions) await a.showAlert();
+	async onDialDown(ev) {
+		const value = this.config.reset;
+		if (!overlay.send(this.config.set, this.argsFor(ev.action, { value }))) {
+			await this.fail(ev.action);
+		}
+	}
+
+	async onTouchTap(ev) {
+		await this.onDialDown(ev);
+	}
+
+	/** Keypad fallback: step through the presets. */
+	async onKeyDown(ev) {
+		const cur = this.value(this.stateOf(ev.action));
+		const presets = this.config.presets;
+		// Next preset strictly above the current value, wrapping around.
+		const value = presets.find((p) => p > cur + 1e-6) ?? presets[0];
+		if (!overlay.send(this.config.set, this.argsFor(ev.action, { value }))) {
+			await this.fail(ev.action);
+		}
+	}
+
+	render() {
+		for (const a of this.actions) {
+			const st = this.stateOf(a);
+			const live = overlay.connected && !!st;
+			const status = this.statusTitle(a);
+
+			if (a.isKey()) {
+				a.setTitle(live ? this.label(st) : status);
+			} else {
+				// The touch strip has room for the overlay name, which matters once
+				// more than one overlay exists.
+				const target = this.targetOf(a);
+				const title = target && st ? `${this.config.title} · ${st.name}` : this.config.title;
+				a.setFeedback({
+					title,
+					value: live ? this.label(st) : status || "offline",
+					indicator: { value: live ? this.percent(st) : 0 },
+				});
+			}
+		}
 	}
 }
 
@@ -208,14 +290,14 @@ class Opacity extends KnobAction {
 		presets: [0.4, 0.6, 0.8, 1],
 	};
 
-	value() {
-		return overlay.state?.opacity ?? 1;
+	value(st) {
+		return st?.opacity ?? 1;
 	}
-	percent() {
-		return Math.round(this.value() * 100);
+	percent(st) {
+		return Math.round(this.value(st) * 100);
 	}
-	label() {
-		return `${this.percent()}%`;
+	label(st) {
+		return `${this.percent(st)}%`;
 	}
 }
 
@@ -230,37 +312,46 @@ class Radius extends KnobAction {
 		presets: [0, 6, 10, 16, 24, 32, 48],
 	};
 
-	value() {
-		return overlay.state?.radius ?? 0;
+	value(st) {
+		return st?.radius ?? 0;
 	}
-	percent() {
+	percent(st) {
 		// The bar is 0-100; 48px is the largest preset, so scale against that.
-		return Math.round(Math.min(100, (this.value() / 48) * 100));
+		return Math.round(Math.min(100, (this.value(st) / 48) * 100));
 	}
-	label() {
-		return `${this.value()} px`;
+	label(st) {
+		return `${this.value(st)} px`;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Property inspector
+// ---------------------------------------------------------------------------
+
+streamDeck.ui.onSendToPlugin((ev) => {
+	if (ev.payload?.request === "overlays") publishOverlaysToUI();
+});
+
+// Send the list as soon as an inspector opens, so its dropdown is populated
+// without the page having to ask.
+streamDeck.ui.onDidAppear(() => publishOverlaysToUI());
 
 // ---------------------------------------------------------------------------
 // Wire up
 // ---------------------------------------------------------------------------
 
-const buttons = [
+for (const action of [
 	new Show(),
 	new Hide(),
 	new Maximize(),
 	new WindowMode(),
 	...CORNER_BUTTONS.map(([id, corner]) => new CornerButton(id, corner)),
-];
-
-for (const button of buttons) {
-	stateButtons.push(button);
-	streamDeck.actions.registerAction(button);
+	new Opacity(),
+	new Radius(),
+]) {
+	allActions.push(action);
+	streamDeck.actions.registerAction(action);
 }
-
-streamDeck.actions.registerAction(new Opacity());
-streamDeck.actions.registerAction(new Radius());
 
 await streamDeck.connect();
 

@@ -45,6 +45,28 @@ built-in `$B1` layout (title, value, bar indicator).
 When the overlay isn't running, keys show `offline` and a press triggers the
 Stream Deck alert badge instead of failing silently.
 
+### Choosing which overlay a key controls
+
+Select a key in the Stream Deck app and use **Overlay to control** in its property
+inspector. The dropdown is populated live from the running app, so it lists the
+overlays by name.
+
+- **Primary overlay** (the default) follows the first entry in `config.json`, so a
+  key keeps working even if you rename or reorder overlays.
+- Picking a specific overlay pins the key to that `id`.
+
+Targeting is **per key**, so two Show buttons can drive two different windows. On a
+Stream Deck + dial, the touch strip title gains the overlay name once a specific
+one is targeted, e.g. `Opacity · Overlay 2`.
+
+If a key points at an overlay that has since been removed it shows `missing` rather
+than silently retargeting itself, and the dropdown keeps the dead id listed as
+*not found*. The plugin log records every change:
+
+```
+com.ljack2k.webcamoverlay.show now targets overlay-2
+```
+
 ### Why `DisableAutomaticStates` matters here
 
 Stream Deck **toggles a two-state key's image by itself on every press** unless the
@@ -80,9 +102,9 @@ One JSON object per line, both directions.
 
 **Targeting.** The overlay supports multiple windows, so most commands accept an
 `overlay` field holding an overlay `id`. Omit it and the command hits the **primary**
-(first) overlay; pass `"*"` and it hits every one. That default is why this plugin
-still works unchanged — its buttons currently drive the primary overlay only.
-Per-overlay targeting from the Stream Deck is not wired up yet.
+(first) overlay; pass `"*"` and it hits every one. Each key sends the id chosen in
+its property inspector, and omits the field when set to Primary — which is why keys
+placed before multi-overlay support keep working untouched.
 
 Commands the plugin sends:
 
