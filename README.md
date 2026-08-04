@@ -141,39 +141,36 @@ The path is absolute, so **re-tick it if you move the project folder**.
 
 ## Staying on top
 
-When a fullscreen app takes the foreground — a game, usually — Windows drops the
-overlay out of the topmost band and never puts it back. The window is still there at
-the same position, just no longer floating, so after you tab out it sits *behind*
-your ordinary windows and looks like it has vanished.
+An overlay can end up out of the topmost band and stay there, still at the same
+position but no longer floating — so it sits *behind* ordinary windows and looks like
+it has vanished. **Bring back on top**, in Settings → System and in the right-click
+and tray menus, puts every visible overlay back.
 
-Two ways out, neither of which is restarting:
+That clears always-on-top and sets it again, then raises the window. Setting it again
+on its own is a no-op, because Electron still believes the window is topmost when
+Windows has decided otherwise, and short-circuits the call.
 
-- **Bring back on top** in Settings → System, or in the right-click and tray menus.
-  Immediate, and applies to every visible overlay
-- A watchdog that re-asserts it **every 0.5 s**, so it is back roughly as fast as you
-  can tab out. Tune it with *Re-assert every*, or set `keep_on_top_seconds` to `0` to
-  turn it off
+### Why this is a button and not a timer
 
-Re-asserting means clearing always-on-top and setting it again, then raising the
-window — setting it again alone is a no-op, because Electron still believes the
-window is topmost when Windows has quietly decided otherwise.
+Measured against the real `WS_EX_TOPMOST` style, Windows treats the two halves of
+that clear-and-set differently while a fullscreen app holds the foreground: the clear
+is permitted, the set is refused. The flag itself *survives* a game taking focus — an
+overlay that had it keeps it, and stays drawn over the game — but no window can
+**acquire** it while the game is in front.
 
-### While the game still has the foreground
+So a periodic re-assert is actively harmful. Every tick throws away a flag that was
+working and cannot get it back until focus leaves the game, which means the overlay
+disappears for precisely as long as you are playing. Opening the Start menu makes it
+reappear at once, because that hands the foreground over and lets the next set land —
+which looks like a fix and is really the symptom.
 
-Re-asserting cannot win *during* fullscreen gameplay: Windows refuses to promote
-anything above the focused fullscreen window, so the call quietly does nothing. A
-trace of the real `WS_EX_TOPMOST` style shows the overlay demoted 0.8 s after the
-game takes focus, ticks failing for as long as it keeps focus, and the very next tick
-succeeding once focus moves away.
+`keep_on_top_seconds` therefore defaults to `0`. Invoked by hand the trade is fine:
+by the time you press the button the flag is already gone, so there is nothing to
+lose. Setting an interval is supported but not advised.
 
-So the watchdog's job is not to fight the game — it is to make sure that the instant
-you tab out or quit, the overlay is already back. Sub-second is the point: at the
-5 s it originally shipped with, tabbing out left it buried for a noticeable beat.
-The interval costs one `SetWindowPos` per window per tick, which is nothing.
-
-Getting an overlay on top of a fullscreen game at all needs a different technique
-entirely — Discord, Steam and OBS inject into the game and draw it themselves. This
-app does not do that.
+One consequence of "cannot acquire while the game is in front": an overlay that
+*starts* during fullscreen gameplay won't get the flag at all. Launching at login
+avoids this; press the button once if you restart the app mid-session.
 
 The Stream Deck and anything else on the control channel can trigger it too:
 
@@ -215,7 +212,7 @@ control port and the hotkeys.
     "toggle_maximize":   "CommandOrControl+Alt+M"
   },
   "corner_margin": 24,
-  "keep_on_top_seconds": 0.5,
+  "keep_on_top_seconds": 0,
   "editor": null,
   "control_port": 28492,
   "overlays": [
@@ -260,9 +257,10 @@ the running app creates or closes windows to match on save.
   through, so no empty space appears at the extremes
 - `corner_margin` — gap left between a window and the screen edge when snapping
   to a corner (global)
-- `keep_on_top_seconds` — how often to re-assert always-on-top; fractions are
-  allowed and expected, `0` disables the watchdog (global). Values below `0.25` are
-  raised to it. See [Staying on top](#staying-on-top)
+- `keep_on_top_seconds` — seconds between automatic re-asserts of always-on-top,
+  `0` (the default) for none (global). Leave it at `0` unless you know you want the
+  trade — see [Why this is a button and not a timer](#why-this-is-a-button-and-not-a-timer).
+  Fractions are allowed; anything above `0` is raised to at least `0.25`
 
 A pre-multi-overlay config, with `window` / `corner_radius` / `camera_id` at the
 top level, is migrated into `overlays[0]` automatically on first load.
