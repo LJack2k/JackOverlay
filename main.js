@@ -135,9 +135,10 @@ const DEFAULT_CONFIG = {
   // Loopback port external controllers talk to. 0 disables the control server.
   control_port: 28492,
   // How often to re-assert always-on-top, in seconds. 0 turns the watchdog off.
-  // Windows drops a window out of the topmost band when something else takes
-  // exclusive fullscreen — a game, usually — and nothing puts it back.
-  keep_on_top_seconds: 5,
+  // Windows drops a window out of the topmost band when a fullscreen app takes the
+  // foreground — a game, usually — and nothing puts it back, so the overlay stays
+  // buried behind ordinary windows after you tab out. This is how long that lasts.
+  keep_on_top_seconds: 0.5,
   overlays: [defaultOverlay('main', 'Main')]
 };
 
@@ -611,9 +612,14 @@ function saveVisibility(ov) {
 
 /**
  * Puts a window back in the topmost band. Windows silently drops WS_EX_TOPMOST
- * when another app goes exclusive fullscreen, and Electron still reports
+ * when a fullscreen app takes the foreground, and Electron still reports
  * isAlwaysOnTop() as true afterwards — so there is nothing to test, the flag has
  * to be cleared and set again to force it to be re-applied.
+ *
+ * Note this cannot win while the fullscreen app still *has* the foreground:
+ * Windows refuses to promote anything above it, so the call quietly does nothing.
+ * It takes effect the moment focus moves elsewhere, which is why the watchdog runs
+ * often rather than waiting for an event it has no way to observe.
  */
 function reassertOnTop(ov) {
   if (!ov.win || ov.win.isDestroyed() || !ov.win.isVisible()) return;
@@ -635,6 +641,12 @@ function reassertAllOnTop() {
 
 let topWatchdog = null;
 
+// Sub-second, because the interval is how long the overlay stays buried after you
+// tab out of a fullscreen game — the re-assert can only take effect once that app
+// gives up the foreground. A SetWindowPos on one or two windows is far too cheap to
+// be worth pacing; the floor only exists to stop a silly value pegging a core.
+const MIN_KEEP_TOP = 0.25;
+
 function startTopWatchdog() {
   clearInterval(topWatchdog);
   topWatchdog = null;
@@ -643,8 +655,9 @@ function startTopWatchdog() {
     log('keep-on-top watchdog disabled');
     return;
   }
-  topWatchdog = setInterval(reassertAllOnTop, Math.max(1, secs) * 1000);
-  log(`keep-on-top watchdog every ${Math.max(1, secs)}s`);
+  const every = Math.max(MIN_KEEP_TOP, secs);
+  topWatchdog = setInterval(reassertAllOnTop, every * 1000);
+  log(`keep-on-top watchdog every ${every}s`);
 }
 
 function showWindow(ov) {
@@ -999,6 +1012,7 @@ function reloadConfigFromDisk() {
   try { next = JSON.parse(text); } catch (_) { return; }   // mid-save / invalid JSON
 
   const prevHotkeys = JSON.stringify(cfg.hotkeys);
+  const prevKeepTop = cfg.keep_on_top_seconds;
   cfg = fillDefaults(migrateConfig(next));
   cachedEditor = undefined;                    // cfg.editor may have changed
 
@@ -1045,6 +1059,8 @@ function reloadConfigFromDisk() {
     globalShortcut.unregisterAll();
     registerHotkeys();
   }
+  // The interval is already running with the old period, so it has to be rebuilt.
+  if (cfg.keep_on_top_seconds !== prevKeepTop) startTopWatchdog();
 
   broadcastState();
   log('config.json reloaded.');
@@ -1131,7 +1147,9 @@ function applySettings(patch) {
     saveConfig();
   }
   if ('keep_on_top_seconds' in patch) {
-    cfg.keep_on_top_seconds = Math.round(clamp(patch.keep_on_top_seconds, 0, 3600));
+    // Not rounded: the useful settings are fractions of a second.
+    const secs = clamp(patch.keep_on_top_seconds, 0, 3600);
+    cfg.keep_on_top_seconds = secs > 0 ? Math.max(MIN_KEEP_TOP, Math.round(secs * 100) / 100) : 0;
     saveConfig();
     startTopWatchdog();
   }

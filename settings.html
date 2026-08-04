@@ -271,17 +271,17 @@
     <div class="row">
       <label class="name">
         Always on top
-        <span class="sub">Windows drops overlays out of the topmost band when another
-          app takes exclusive fullscreen. This puts them back.</span>
+        <span class="sub">Windows drops overlays out of the topmost band when a
+          fullscreen app takes the foreground. This puts them back.</span>
       </label>
       <button id="reassert">Bring back on top</button>
     </div>
     <div class="row">
       <label class="name" for="keepTop">
-        Re-assert automatically
+        Re-assert every
         <span class="sub" id="keepTopNote"></span>
       </label>
-      <input type="number" id="keepTop" min="0" max="3600" step="1">
+      <input type="number" id="keepTop" min="0" max="3600" step="0.25">
     </div>
     <div class="row">
       <label class="name" for="port">
@@ -460,7 +460,8 @@
     const keepTop = c.keep_on_top_seconds ?? 0;
     $('keepTop').value = keepTop;
     $('keepTopNote').textContent = keepTop > 0
-      ? `Every ${keepTop}s, so it recovers on its own. 0 turns this off.`
+      ? `Seconds. How long it stays buried after you tab out of a fullscreen game. `
+        + `0 turns this off.`
       : 'Off — use the button above when it happens. Set a number of seconds to automate it.';
 
     $('port').value = c.control_port ?? 0;
