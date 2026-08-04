@@ -88,6 +88,29 @@ remove the entry; it also shows up in Task Manager's Startup tab.
 
 The path is absolute, so **re-tick it if you move the project folder**.
 
+## Saving, and the log
+
+Settings live in memory and are written to `config.json` **at most once a minute**,
+to keep SSD writes down — sweeping a dial would otherwise be dozens of whole-file
+writes. Pending changes also flush when you quit, or immediately via **Save now**
+in the Settings footer, which shows `saved` / `unsaved` so you always know.
+
+Writes go to a temp file and are then renamed, which is atomic on one volume. If
+`config.json` ever *can't* be parsed the app keeps a copy at `config.json.corrupt`
+and starts from defaults rather than quietly overwriting your overlays.
+
+The trade-off: if the process is killed outright — as opposed to quitting — you can
+lose up to a minute of changes.
+
+Everything is logged to `webcam-overlay.log` next to `config.json`, rotating to
+`.log.old` past 512 KB. That matters because launching at Windows login gives the
+app no console, so stdout goes nowhere — including hotkey-registration failures and
+camera errors.
+
+Only one copy runs at a time. Launching it again surfaces the overlays that should
+be visible instead of starting a rival set that would fight over `config.json`, the
+control port and the hotkeys.
+
 ## Configuration
 
 `config.json` sits next to `main.js` and is re-read whenever you save it:
@@ -162,6 +185,24 @@ node -e "require('net').createConnection(28492,'127.0.0.1').end(JSON.stringify({
 
 The channel binds to `127.0.0.1` only and has no authentication — don't change the
 bind host.
+
+## When a camera goes away
+
+If the selected camera can't be opened — unplugged, or held exclusively by another
+app — the overlay shows a short message and reports it. It does **not** quietly
+switch to a different device: showing the wrong camera on a live overlay is worse
+than showing nothing, because you might not notice.
+
+| Shown | Cause |
+|---|---|
+| `Camera disconnected` | It vanished mid-session |
+| `Selected camera not available` | The saved device isn't present |
+| `Camera is in use by another app` | Something else holds it exclusively |
+| `Camera access denied` | Permission refused |
+
+The same state reaches the tray menu, the Settings window and the Stream Deck keys,
+which show an amber warning badge. Plug the camera back in and the overlay
+re-acquires it automatically — no need to reselect it.
 
 ## Hidden overlays release their camera
 

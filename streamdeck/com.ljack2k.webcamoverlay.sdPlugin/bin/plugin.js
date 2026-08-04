@@ -16,6 +16,14 @@ const allActions = [];
 // is async and would race the state pushes.
 const instanceSettings = new Map();
 
+// Last status badge sent per action instance, so renders don't re-send it.
+const lastBadge = new Map();
+
+const STATUS = {
+	offline: "imgs/status/offline.png",
+	missing: "imgs/status/missing.png",
+};
+
 function renderAll() {
 	for (const a of allActions) {
 		try {
@@ -70,6 +78,7 @@ class OverlayAction extends SingletonAction {
 
 	onWillDisappear(ev) {
 		instanceSettings.delete(ev.action.id);
+		lastBadge.delete(ev.action.id);
 	}
 
 	onDidReceiveSettings(ev) {
@@ -106,13 +115,35 @@ class OverlayAction extends SingletonAction {
 	}
 
 	/**
-	 * "offline" when the overlay app isn't running, "missing" when this key points
-	 * at an overlay that has since been removed — otherwise blank, so a key never
-	 * silently does nothing.
+	 * A status badge to draw over the key's own image, or undefined when all is
+	 * well. Signalled with an image rather than the title so a key never
+	 * commandeers a label you set yourself.
+	 *
+	 * Stream Deck ignores setImage when the user has picked a custom image for the
+	 * key, which is the right precedence — but it does mean the badge won't show
+	 * on such a key.
 	 */
-	statusTitle(action) {
+	statusImage(action) {
+		if (!overlay.connected) return STATUS.offline;
+		const st = this.stateOf(action);
+		if (!st) return STATUS.missing;              // overlay removed since it was set
+		if (st.error) return STATUS.offline;         // camera gone or unavailable
+		return undefined;                            // undefined = the manifest image
+	}
+
+	/** Only sends when the badge actually changes; renders are frequent. */
+	setBadge(action, image) {
+		if (lastBadge.get(action.id) === image) return;
+		lastBadge.set(action.id, image);
+		action.setImage(image);
+	}
+
+	/** Short word for the dial readout, where there is no user title to protect. */
+	statusWord(action) {
 		if (!overlay.connected) return "offline";
-		if (!this.stateOf(action)) return "missing";
+		const st = this.stateOf(action);
+		if (!st) return "missing";
+		if (st.error) return "no camera";
 		return "";
 	}
 
@@ -156,9 +187,11 @@ class StateButton extends OverlayAction {
 		for (const a of this.actions) {
 			if (!a.isKey()) continue;
 			const st = this.stateOf(a);
-			const lit = overlay.connected && st && this.config.active(st);
+			// A camera that isn't working shouldn't read as a healthy lit state.
+			const lit = overlay.connected && st && !st.error && this.config.active(st);
 			a.setState(lit ? 1 : 0);
-			a.setTitle(this.statusTitle(a));
+			this.setBadge(a, this.statusImage(a));
+			// Deliberately no setTitle here — the key's label is yours.
 		}
 	}
 }
@@ -271,11 +304,15 @@ class KnobAction extends OverlayAction {
 	render() {
 		for (const a of this.actions) {
 			const st = this.stateOf(a);
-			const live = overlay.connected && !!st;
-			const status = this.statusTitle(a);
+			const live = overlay.connected && !!st && !st.error;
+			const status = this.statusWord(a);
 
 			if (a.isKey()) {
-				a.setTitle(live ? this.label(st) : status);
+				// The title is this action's readout — it's showing you the value,
+				// not overwriting a label with a status word. When something is
+				// wrong the badge says so and the title goes quiet.
+				this.setBadge(a, this.statusImage(a));
+				a.setTitle(live ? this.label(st) : '');
 			} else {
 				// The touch strip has room for the overlay name, which matters once
 				// more than one overlay exists.
@@ -285,6 +322,12 @@ class KnobAction extends OverlayAction {
 					title,
 					value: live ? this.label(st) : status || "offline",
 					indicator: { value: live ? this.percent(st) : 0 },
+					// The touch-strip icon is the layout's own, not a user label, so
+					// swapping it for a status badge costs nothing. It must be set back
+					// explicitly: an undefined value is dropped when the payload is
+					// serialised, and Stream Deck then keeps the last icon it was
+					// given — which left healthy dials stuck showing a warning.
+					icon: this.statusImage(a) ?? this.config.icon,
 				});
 			}
 		}
@@ -295,6 +338,7 @@ class Opacity extends KnobAction {
 	manifestId = "com.ljack2k.webcamoverlay.opacity";
 	config = {
 		title: "Opacity",
+		icon: "imgs/actions/opacity/encoder.png",
 		nudge: "nudgeOpacity",
 		set: "setOpacity",
 		step: 0.05,
@@ -317,6 +361,7 @@ class Radius extends KnobAction {
 	manifestId = "com.ljack2k.webcamoverlay.radius";
 	config = {
 		title: "Corner radius",
+		icon: "imgs/actions/radius/encoder.png",
 		nudge: "nudgeRadius",
 		set: "setRadius",
 		step: 2,
@@ -345,6 +390,7 @@ class Zoom extends KnobAction {
 	manifestId = "com.ljack2k.webcamoverlay.zoom";
 	config = {
 		title: "Zoom",
+		icon: "imgs/actions/zoom/encoder.png",
 		nudge: "nudgeZoom",
 		set: "setZoom",
 		step: 0.05,
@@ -376,6 +422,7 @@ class PanAction extends KnobAction {
 		this.manifestId = `com.ljack2k.webcamoverlay.pan${axis}`;
 		this.config = {
 			title: `Pan ${upper}`,
+			icon: `imgs/actions/pan${axis}/encoder.png`,
 			nudge: "nudgePan",
 			set: "setPan",
 			nudgeArgs: (delta) => ({ [`d${axis}`]: delta }),

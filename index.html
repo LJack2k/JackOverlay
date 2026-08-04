@@ -199,6 +199,19 @@
   // and throw its stream away instead of quietly turning the device back on.
   let generation = 0;
 
+  // Shown in the overlay itself, and reported up so the tray menu, settings and
+  // Stream Deck keys can all reflect it rather than the overlay just going dark.
+  let cameraFailed = false;
+
+  function showCameraError(message) {
+    releaseCamera();
+    cameraFailed = true;
+    video.style.display = 'none';
+    error.style.display = 'flex';
+    error.textContent = message;
+    window.api.reportCameraError(message);
+  }
+
   function releaseCamera() {
     generation++;
     if (stream) {
@@ -209,7 +222,7 @@
     video.srcObject = null;
   }
 
-  async function startCamera(deviceId, allowFallback = true) {
+  async function startCamera(deviceId) {
     releaseCamera();
     const gen = generation;
     try {
@@ -239,13 +252,38 @@
       error.style.display = 'none';
       video.style.display = 'block';
       reportVideoSize();      // in case metadata is already available
+      cameraFailed = false;
+      window.api.reportCameraError(null);
+
+      // A camera can vanish mid-session — unplugged, or grabbed exclusively by
+      // another app. The track ends but the element keeps showing the last frame,
+      // so without this the overlay silently freezes.
+      for (const track of stream.getTracks()) {
+        track.addEventListener('ended', () => {
+          if (gen !== generation) return;      // already replaced deliberately
+          showCameraError('Camera disconnected');
+        });
+      }
     } catch (e) {
-      // A saved camera that has since been unplugged shouldn't leave a dead
-      // overlay — fall back to whatever camera is available.
-      if (deviceId && allowFallback) return startCamera(null, false);
-      video.style.display = 'none';
-      error.style.display = 'flex';
-      error.textContent = `Camera error: ${e.message}`;
+      // Deliberately no falling back to a different device. Quietly showing the
+      // wrong camera on a live overlay is worse than showing nothing: you might
+      // not notice, and it could be pointed at something you didn't intend.
+      showCameraError(describeCameraError(e, deviceId));
+    }
+  }
+
+  function describeCameraError(e, deviceId) {
+    switch (e.name) {
+      // An `exact` deviceId that no longer matches anything.
+      case 'OverconstrainedError':
+      case 'NotFoundError':
+        return deviceId ? 'Selected camera not available' : 'No camera found';
+      case 'NotReadableError':
+        return 'Camera is in use by another app';
+      case 'NotAllowedError':
+        return 'Camera access denied';
+      default:
+        return e.message;
     }
   }
 
@@ -286,8 +324,14 @@
     if (visible) activate();
   });
 
-  navigator.mediaDevices.addEventListener('devicechange', () => {
-    if (visible) reportCameras();
+  navigator.mediaDevices.addEventListener('devicechange', async () => {
+    if (!visible) return;
+    await reportCameras();
+    // Plugging the camera back in should just work. Without this the overlay
+    // would sit on the error until you toggled it or reselected the device.
+    if (cameraFailed) {
+      await activate();
+    }
   });
 
   // ---- Move / resize ----------------------------------------------------

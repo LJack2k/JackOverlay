@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   onPan:           (cb)     => ipcRenderer.on('pan', (_e, pan) => cb(pan)),
   onZoom:          (cb)     => ipcRenderer.on('zoom', (_e, z) => cb(z)),
   reportVideoSize: (w, h)   => ipcRenderer.send('video-size', { width: w, height: h }),
+  reportCameraError: (msg)  => ipcRenderer.send('camera-error', msg),
 
   // Camera list / selection
   reportCameras:   (list)   => ipcRenderer.send('cameras-reported', list),

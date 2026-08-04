@@ -14,6 +14,12 @@ const { startControlServer } = require('./control-server');
 // ---------------------------------------------------------------------------
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
+const LOG_PATH    = path.join(__dirname, 'webcam-overlay.log');
+const LOG_MAX     = 512 * 1024;   // rotate past this, keeping one .old
+
+// Config is held in memory and flushed at most this often, to keep SSD writes
+// down — a dial sweep would otherwise be dozens of whole-file writes.
+const SAVE_INTERVAL = 60_000;
 
 const MIN_W = 160;
 const MIN_H = 120;
@@ -43,6 +49,31 @@ const FITS = {
 // Registry value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
 const STARTUP_NAME = 'Webcam Overlay';
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+// Launched at Windows login there is no console attached, so anything only
+// written to stdout is lost — including the hotkey-registration warnings, which
+// are exactly what you need when something misbehaves at boot.
+function rotateLogIfBig() {
+  try {
+    if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > LOG_MAX) {
+      fs.renameSync(LOG_PATH, LOG_PATH + '.old');
+    }
+  } catch (_) {}
+}
+
+function write(level, args) {
+  const line = `${new Date().toISOString()} ${level} ${args.join(' ')}`;
+  if (level === 'ERROR') console.error(line);
+  else console.log(line);
+  try { fs.appendFileSync(LOG_PATH, line + '\n'); } catch (_) {}
+}
+
+const log      = (...a) => write('INFO ', a);
+const logError = (...a) => write('ERROR', a);
 
 // ---------------------------------------------------------------------------
 // Config
@@ -140,23 +171,72 @@ function fillDefaults(cfgIn) {
   return cfgIn;
 }
 
+/** Returns the parsed config, or null if there isn't a usable one on disk. */
 function loadConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
+  if (!fs.existsSync(CONFIG_PATH)) return null;
+  try {
+    return fillDefaults(migrateConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))));
+  } catch (e) {
+    // Don't quietly carry on with defaults and then overwrite the file: that
+    // turns one bad read into permanent loss of every overlay.
+    logError(`config.json could not be parsed: ${e.message}`);
     try {
-      return fillDefaults(migrateConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))));
-    } catch (_) { /* fall through to defaults */ }
+      const kept = CONFIG_PATH + '.corrupt';
+      fs.copyFileSync(CONFIG_PATH, kept);
+      logError(`a copy was kept at ${kept}`);
+    } catch (_) {}
+    return null;
   }
-  const fresh = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-  saveConfig(fresh);
-  return fresh;
 }
 
-function saveConfig(c) {
+let dirty = false;
+let saveTimer = null;
+
+/**
+ * Writes now, via a temp file and a rename. A plain writeFileSync that dies
+ * part-way leaves truncated JSON, and loadConfig would then fall back to
+ * defaults — silently discarding every overlay. rename is atomic on one volume.
+ */
+function writeConfigNow() {
   try {
-    const text = JSON.stringify(c, null, 2);
+    const text = JSON.stringify(cfg, null, 2);
+    const tmp  = CONFIG_PATH + '.tmp';
+    fs.writeFileSync(tmp, text);
+    fs.renameSync(tmp, CONFIG_PATH);
     lastWrittenConfig = text;
-    fs.writeFileSync(CONFIG_PATH, text);
-  } catch (_) {}
+    dirty = false;
+    return true;
+  } catch (e) {
+    logError(`could not write config: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * Marks the in-memory config as needing a write and schedules one. Callers see
+ * their change immediately; the disk catches up within SAVE_INTERVAL, or sooner
+ * if Save now is pressed or the app quits.
+ */
+function markDirty() {
+  dirty = true;
+  if (!saveTimer) {
+    saveTimer = setTimeout(() => { saveTimer = null; flushConfig(); }, SAVE_INTERVAL);
+  }
+  pushSettings();
+}
+
+function flushConfig() {
+  if (!dirty) return false;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const ok = writeConfigNow();
+  pushSettings();
+  return ok;
+}
+
+// Kept as a thin alias so the many mutators read the same as before.
+function saveConfig() {
+  markDirty();
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +311,7 @@ function saveBounds(ov) {
   conf.window.y = b.y;
   conf.window.width  = b.width;
   conf.window.height = b.height;
-  saveConfig(cfg);
+  saveConfig();
   // Moving or resizing can take a window out of a corner, so controllers need to
   // hear about it too — otherwise a corner button stays lit after a drag.
   broadcastState();
@@ -263,7 +343,7 @@ function applyVisible(ov) {
 
 function setMirror(ov, on) {
   confOf(ov).mirror = !!on;
-  saveConfig(cfg);
+  saveConfig();
   applyMirror(ov);
   broadcastState();
 }
@@ -277,7 +357,7 @@ function applyFit(ov) {
 function setFit(ov, fit) {
   if (!(fit in FITS)) return;
   confOf(ov).fit = fit;
-  saveConfig(cfg);
+  saveConfig();
   applyFit(ov);
   broadcastState();
 }
@@ -298,7 +378,7 @@ function applyZoom(ov) {
 function setZoom(ov, z) {
   // Two decimals: the dial steps in 0.05 and JS floats would otherwise drift.
   confOf(ov).zoom = Math.round(clamp(z, 1, 4) * 100) / 100;
-  saveConfig(cfg);
+  saveConfig();
   applyZoom(ov);
   broadcastState();
 }
@@ -308,7 +388,7 @@ function setPan(ov, x, y) {
   const conf = confOf(ov);
   if (x !== undefined && x !== null) conf.pan_x = Math.round(clamp(x, 0, 100));
   if (y !== undefined && y !== null) conf.pan_y = Math.round(clamp(y, 0, 100));
-  saveConfig(cfg);
+  saveConfig();
   applyPan(ov);
   broadcastState();
 }
@@ -332,7 +412,7 @@ function fitWindowToCamera(ov) {
 
 function setCornerRadius(ov, px) {
   confOf(ov).corner_radius = Math.round(clamp(px, 0, MAX_RADIUS));
-  saveConfig(cfg);
+  saveConfig();
   applyCornerRadius(ov);
   broadcastState();
 }
@@ -341,7 +421,7 @@ function setOpacity(ov, value) {
   const v = Math.round(clamp(value, MIN_OPACITY, 1) * 100) / 100;
   ov.win.setOpacity(v);
   confOf(ov).window.opacity = v;
-  saveConfig(cfg);
+  saveConfig();
   broadcastState();
 }
 
@@ -353,7 +433,7 @@ function setCamera(ov, id, label) {
   const conf = confOf(ov);
   conf.camera_id    = id    || null;
   conf.camera_label = label || null;
-  saveConfig(cfg);
+  saveConfig();
   if (ov.win && !ov.win.isDestroyed()) ov.win.webContents.send('set-camera', conf.camera_id);
   pushSettings();
   broadcastState();
@@ -415,9 +495,9 @@ function startsWithWindows() {
 function setStartWithWindows(enabled) {
   try {
     app.setLoginItemSettings({ openAtLogin: !!enabled, ...startupTarget() });
-    console.log(`Start with Windows: ${startsWithWindows() ? 'on' : 'off'}`);
+    log(`Start with Windows: ${startsWithWindows() ? 'on' : 'off'}`);
   } catch (e) {
-    console.error(`Could not change the startup setting: ${e.message}`);
+    logError(`Could not change the startup setting: ${e.message}`);
   }
 }
 
@@ -463,7 +543,7 @@ function fallbackOpen(editor, why) {
   // Deliberately Notepad rather than shell.openPath(): with no registered .json
   // handler, openPath shows the "How do you want to open this file?" picker,
   // which is exactly what the editor detection exists to avoid.
-  console.error(`Could not launch editor "${editor}": ${why} — falling back to Notepad.`);
+  logError(`Could not launch editor "${editor}": ${why} — falling back to Notepad.`);
   try {
     spawn('notepad.exe', [CONFIG_PATH], { detached: true, stdio: 'ignore' }).unref();
   } catch (_) {
@@ -493,7 +573,7 @@ function openConfigInEditor() {
   // try/catch on its own would silently do nothing at all.
   child.on('error', (e) => fallbackOpen(editor, e.message));
   child.unref();
-  console.log(`config.json opened in: ${editor}`);
+  log(`config.json opened in: ${editor}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -508,7 +588,7 @@ function saveVisibility(ov) {
   const vis = !!(ov.win && !ov.win.isDestroyed() && ov.win.isVisible());
   if (conf.visible === vis) return;      // don't churn the file on no-op toggles
   conf.visible = vis;
-  saveConfig(cfg);
+  saveConfig();
 }
 
 function showWindow(ov) {
@@ -701,11 +781,11 @@ function addOverlay() {
   }
 
   cfg.overlays.push(conf);
-  saveConfig(cfg);
+  saveConfig();
   createOverlay(conf);
   pushSettings();
   broadcastState();
-  console.log(`Added overlay "${conf.name}" (${conf.id})`);
+  log(`Added overlay "${conf.name}" (${conf.id})`);
   return conf.id;
 }
 
@@ -719,11 +799,11 @@ function removeOverlay(id) {
 
   overlays.delete(id);
   cfg.overlays = cfg.overlays.filter((o) => o.id !== id);
-  saveConfig(cfg);
+  saveConfig();
   if (ov.win && !ov.win.isDestroyed()) ov.win.destroy();
   pushSettings();
   broadcastState();
-  console.log(`Removed overlay ${id}`);
+  log(`Removed overlay ${id}`);
   return true;
 }
 
@@ -731,7 +811,7 @@ function renameOverlay(id, name) {
   const conf = cfg.overlays.find((o) => o.id === id);
   if (!conf) return;
   conf.name = String(name || '').trim() || conf.id;
-  saveConfig(cfg);
+  saveConfig();
   pushSettings();
   broadcastState();
 }
@@ -758,6 +838,8 @@ function overlayState(ov) {
     zoom:    conf.zoom,
     corner:  currentCorner(ov),
     camera:  conf.camera_label,
+    // Null when the camera is fine; a short message when it isn't.
+    error:   ov.cameraError || null,
     // Intrinsic size of the live stream, once the renderer has reported it.
     video:   ov.video || null
   };
@@ -907,7 +989,7 @@ function reloadConfigFromDisk() {
   }
 
   broadcastState();
-  console.log('config.json reloaded.');
+  log('config.json reloaded.');
 }
 
 // ---------------------------------------------------------------------------
@@ -921,6 +1003,9 @@ function settingsSnapshot() {
     startup:    startsWithWindows(),
     hotkeyOk:   hotkeyStatus,
     configPath: CONFIG_PATH,
+    logPath:    LOG_PATH,
+    unsaved:    dirty,
+    saveSeconds: SAVE_INTERVAL / 1000,
     editor:     resolveEditor(),
     overlays:   liveOverlays().map((ov) => ({
       ...overlayState(ov),
@@ -975,21 +1060,21 @@ function applySettings(patch) {
   if ('startup'       in patch) setStartWithWindows(patch.startup);
   if ('corner_margin' in patch) {
     cfg.corner_margin = Math.round(clamp(patch.corner_margin, 0, 400));
-    saveConfig(cfg);
+    saveConfig();
   }
   if ('editor' in patch) {
     cfg.editor = patch.editor || null;
     cachedEditor = undefined;              // re-resolve on next use
-    saveConfig(cfg);
+    saveConfig();
   }
   if ('control_port' in patch) {
     // Bound once at startup, so this one genuinely needs a restart.
     cfg.control_port = Math.round(clamp(patch.control_port, 0, 65535));
-    saveConfig(cfg);
+    saveConfig();
   }
   if ('hotkeys' in patch) {
     cfg.hotkeys = { ...cfg.hotkeys, ...patch.hotkeys };
-    saveConfig(cfg);
+    saveConfig();
     globalShortcut.unregisterAll();
     registerHotkeys();
   }
@@ -1080,6 +1165,9 @@ function overlayItems(ov) {
   const hidden = !ov.win.isVisible();
   const items = [];
 
+  if (ov.cameraError) {
+    items.push({ label: `⚠  ${ov.cameraError}`, enabled: false }, { type: 'separator' });
+  }
   if (hidden) items.push({ label: 'Show', click: () => showWindow(ov) }, { type: 'separator' });
 
   items.push(
@@ -1209,16 +1297,16 @@ function registerHotkeys() {
     let ok = false;
     try { ok = globalShortcut.register(accel, handler); } catch (e) {
       hotkeyStatus[name] = false;
-      console.error(`  hotkey ${accel} (${what}) — invalid accelerator: ${e.message}`);
+      logError(`  hotkey ${accel} (${what}) — invalid accelerator: ${e.message}`);
       continue;
     }
     hotkeyStatus[name] = ok;
     if (ok) {
-      console.log(`  ${accel} — ${what}`);
+      log(`  ${accel} — ${what}`);
     } else {
       // Silent failure here is what makes a maximized window feel unrecoverable,
       // so say so loudly and point at the escape hatch.
-      console.error(`  hotkey ${accel} (${what}) FAILED to register — likely already ` +
+      logError(`  hotkey ${accel} (${what}) FAILED to register — likely already ` +
                     `owned by another app. Use the right-click menu or the tray icon, ` +
                     `and change "${accel}" in config.json.`);
     }
@@ -1266,14 +1354,28 @@ ipcMain.on('video-size', (event, size) => {
   const ov = overlayFor(event);
   if (!ov || !size || !size.width || !size.height) return;
   ov.video = { width: size.width, height: size.height };
-  console.log(`  ${ov.id}: stream ${size.width}×${size.height}`);
+  log(`  ${ov.id}: stream ${size.width}×${size.height}`);
+  pushSettings();
+  broadcastState();
+});
+
+// A camera that vanished mid-session, or refused to open. Surfaced in the tray
+// menu, the settings window and the Stream Deck keys.
+ipcMain.on('camera-error', (event, message) => {
+  const ov = overlayFor(event);
+  if (!ov) return;
+  const next = message || null;
+  if (ov.cameraError === next) return;
+  ov.cameraError = next;
+  if (next) logError(`${ov.id}: ${next}`);
+  else log(`${ov.id}: camera ok`);
   pushSettings();
   broadcastState();
 });
 
 ipcMain.on('cameras-reported', (_e, list) => {
   cameras = Array.isArray(list) ? list : [];
-  console.log(`  cameras: ${cameras.map((c) => c.label || c.deviceId).join(' | ') || 'none'}`);
+  log(`  cameras: ${cameras.map((c) => c.label || c.deviceId).join(' | ') || 'none'}`);
   pushSettings();
 });
 
@@ -1324,38 +1426,67 @@ ipcMain.on('drag-end', (event) => {
 ipcMain.handle('settings:get',        () => settingsSnapshot());
 ipcMain.handle('settings:apply',      (_e, patch) => { applySettings(patch); return settingsSnapshot(); });
 ipcMain.handle('settings:openConfig', () => openConfigInEditor());
+ipcMain.handle('settings:save',       () => { flushConfig(); return settingsSnapshot(); });
 ipcMain.on('settings:close',          () => { if (settingsWin) settingsWin.close(); });
 
 // ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-app.whenReady().then(() => {
-  cfg = loadConfig();
-  for (const conf of cfg.overlays) createOverlay(conf);
+// A second copy would fight the first over config.json, fail to bind the control
+// port and fail to register the hotkeys — all of it invisible when started at
+// login. Surface the running instance instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    log('second instance attempted — surfacing the running one instead');
+    // Show the overlays that are *meant* to be visible, so launching again does
+    // something. Deliberately not "show everything": that would silently undo a
+    // hide the user had chosen and persisted. If they are all hidden, bring the
+    // primary back rather than appearing to do nothing at all.
+    const shouldShow = liveOverlays().filter((ov) => confOf(ov).visible !== false);
+    const targets = shouldShow.length ? shouldShow : [primaryOverlay()].filter(Boolean);
+    for (const ov of targets) showWindow(ov);
+  });
 
-  createTray();
-  console.log(`Webcam Overlay running — ${cfg.overlays.length} overlay(s).`);
-  registerHotkeys();
-  watchConfig();
+  app.whenReady().then(() => {
+    rotateLogIfBig();
 
-  if (cfg.control_port) {
-    control = startControlServer({
-      port:      cfg.control_port,
-      onCommand: handleControlCommand,
-      getState:  currentState,
-      log:       (m) => console.log(`  ${m}`)
-    });
-  }
+    cfg = loadConfig();
+    if (!cfg) {
+      cfg = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+      writeConfigNow();
+      log('created a fresh config.json');
+    }
 
-  console.log('  Right-click an overlay (or the tray icon) for the menu.');
-  console.log(`  Config: ${CONFIG_PATH}  (edits are picked up live)`);
-});
+    for (const conf of cfg.overlays) createOverlay(conf);
+
+    createTray();
+    log(`Webcam Overlay running — ${cfg.overlays.length} overlay(s)`);
+    registerHotkeys();
+    watchConfig();
+
+    if (cfg.control_port) {
+      control = startControlServer({
+        port:      cfg.control_port,
+        onCommand: handleControlCommand,
+        getState:  currentState,
+        log:       (m) => log(m)
+      });
+    }
+
+    log(`config: ${CONFIG_PATH} (edits picked up live, writes coalesced to ${SAVE_INTERVAL / 1000}s)`);
+    log(`log:    ${LOG_PATH}`);
+  });
+}
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   try { fs.unwatchFile(CONFIG_PATH); } catch (_) {}
   if (control) control.close();
+  // Anything changed since the last flush would otherwise be lost.
+  if (flushConfig()) log('flushed pending config changes on quit');
 });
 
 // Keep alive when all windows are closed (hide doesn't count)

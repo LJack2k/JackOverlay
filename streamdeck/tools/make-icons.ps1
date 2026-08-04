@@ -38,6 +38,42 @@ function New-RoundedPath([single]$x, [single]$y, [single]$w, [single]$h, [single
   return $p
 }
 
+# Status badges, applied over any action's own image via setImage so a key can
+# report a problem without commandeering its title.
+function Draw-Status($g, [string]$kind) {
+  $amber = [System.Drawing.Color]::FromArgb(255, 240, 173,  78)
+  if ($kind -eq 'offline') {
+    # Warning triangle with an exclamation: the overlay app isn't reachable.
+    $tri = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $pts = [System.Drawing.PointF[]]@(
+      [System.Drawing.PointF]::new(36, 12),
+      [System.Drawing.PointF]::new(64, 58),
+      [System.Drawing.PointF]::new(8,  58))
+    $tri.AddPolygon($pts)
+    $pen = New-Object System.Drawing.Pen $amber, 6
+    $pen.LineJoin = 'Round'
+    $g.DrawPath($pen, $tri)
+    $pen.Dispose(); $tri.Dispose()
+
+    $bar = New-Object System.Drawing.SolidBrush $amber
+    $g.FillRectangle($bar, 33, 28, 6, 14)
+    $g.FillEllipse($bar, 33, 46, 6, 6)
+    $bar.Dispose()
+  } else {
+    # Frame with a cross: the overlay this key points at no longer exists.
+    $pen = New-Object System.Drawing.Pen $FrameOff, 4
+    $outline = New-RoundedPath 6 12 60 44 5
+    $g.DrawPath($pen, $outline)
+    $outline.Dispose(); $pen.Dispose()
+
+    $x = New-Object System.Drawing.Pen $Red, 6
+    $x.StartCap = 'Round'; $x.EndCap = 'Round'
+    $g.DrawLine($x, 22, 22, 50, 46)
+    $g.DrawLine($x, 50, 22, 22, 46)
+    $x.Dispose()
+  }
+}
+
 function Fill-Triangle($g, $brush, $points) {
   # The array MUST be cast, or PowerShell binds the single-Point overload of
   # AddPolygon and throws.
@@ -265,6 +301,9 @@ $icons = @(
   @{ rel = 'imgs/actions/opacity/icon';    size = 20; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/key';     size = 72; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/encoder'; size = 72; draw = { param($g) Draw-Opacity $g } },
+
+  @{ rel = 'imgs/status/offline';          size = 72; draw = { param($g) Draw-Status $g 'offline' } },
+  @{ rel = 'imgs/status/missing';          size = 72; draw = { param($g) Draw-Status $g 'missing' } },
 
   @{ rel = 'imgs/actions/zoom/icon';       size = 20; draw = { param($g) Draw-Zoom $g } },
   @{ rel = 'imgs/actions/zoom/key';        size = 72; draw = { param($g) Draw-Zoom $g } },

@@ -50,8 +50,25 @@ Both knobs declare `Controllers: ["Keypad", "Encoder"]`, so the same action work
 a plain keypad and on a Stream Deck + dial. On a dial they render through the
 built-in `$B1` layout (title, value, bar indicator).
 
-When the overlay isn't running, keys show `offline` and a press triggers the
-Stream Deck alert badge instead of failing silently.
+### Status is shown with images, not titles
+
+Keys never write their own title — that label is yours. Problems are signalled by
+swapping the key image instead:
+
+| Badge | Meaning |
+|---|---|
+| Amber warning triangle | The overlay app isn't running, or that overlay's camera has failed |
+| Red cross in a frame | This key points at an overlay that no longer exists |
+
+A key with a camera fault also stops reading as lit, so a broken feed can't look
+healthy. Pressing an unreachable key still triggers Stream Deck's alert.
+
+Stream Deck ignores `setImage` when you've set a custom image on a key, which is
+the right precedence — but it does mean the badge won't appear on such a key.
+
+The two knob actions are the exception: they use the title to show their current
+value, which is the point of putting one on a key. When something's wrong the badge
+says so and the value goes blank.
 
 ### Choosing which overlay a key controls
 
@@ -159,7 +176,7 @@ The overlay pushes this on connect and after every change:
     { "id": "main", "name": "Main", "mode": "windowed", "visible": true,
       "opacity": 1, "radius": 16, "mirror": false, "fit": "cover",
       "pan_x": 50, "pan_y": 50, "zoom": 1,
-      "corner": "bottom-right", "camera": "Insta360 Link 2 Pro",
+      "corner": "bottom-right", "camera": "Insta360 Link 2 Pro", "error": null,
       "video": { "width": 1920, "height": 1080 } }
   ]
 }
@@ -172,6 +189,9 @@ keep reading the shape they expect.
 `corner` is the screen corner a window is currently parked in, or `null` when it
 sits anywhere else — computed from the live bounds, so dragging a window off a
 corner clears it.
+
+`error` is `null` when the camera is fine, or a short message when it isn't — a
+device that vanished mid-session, or one another app holds exclusively.
 
 Pushes are coalesced (20 ms) because one action often touches several setters —
 maximizing also shows the window.

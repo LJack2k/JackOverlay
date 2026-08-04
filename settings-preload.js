@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('settings', {
   get:        ()      => ipcRenderer.invoke('settings:get'),
   apply:      (patch) => ipcRenderer.invoke('settings:apply', patch),
   openConfig: ()      => ipcRenderer.invoke('settings:openConfig'),
+  save:       ()      => ipcRenderer.invoke('settings:save'),
   close:      ()      => ipcRenderer.send('settings:close'),
 
   // Pushed whenever anything changes the overlay, including from the tray menu,

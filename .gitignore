@@ -5,9 +5,14 @@ node_modules/
 # and it holds this machine's window position/size, so it should not be shared.
 /config.json
 
-# Stream Deck plugin runtime logs
+# Runtime logs — the overlay's own log plus the Stream Deck plugin's
 logs/
 *.log
+*.log.old
+
+# Transient / recovery artefacts from config writes
+/config.json.tmp
+/config.json.corrupt
 
 # Editor / OS cruft
 .vscode/

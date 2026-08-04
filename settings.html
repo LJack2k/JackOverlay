@@ -281,6 +281,8 @@
 
 <footer>
   <span class="path" id="configPath"></span>
+  <span class="pill" id="saveState"></span>
+  <button id="save">Save now</button>
   <button id="openConfig">Open config.json</button>
   <button id="close">Close</button>
 </footer>
@@ -442,6 +444,16 @@
     $('port').value = c.control_port ?? 0;
     $('configPath').textContent = s.configPath;
 
+    // Writes are coalesced to keep SSD wear down, so say plainly whether what's
+    // on screen has reached the disk yet.
+    const saveEl = $('saveState');
+    saveEl.textContent = s.unsaved ? 'unsaved' : 'saved';
+    saveEl.className = 'pill ' + (s.unsaved ? 'bad' : 'ok');
+    saveEl.title = s.unsaved
+      ? `Changes are in memory; they write within ${s.saveSeconds}s, on quit, or when you press Save now.`
+      : 'Everything is written to config.json.';
+    $('save').disabled = !s.unsaved;
+
     loading = false;
   }
 
@@ -523,6 +535,7 @@
     if (!loading) apply({ startup: e.target.checked });
   });
 
+  $('save').addEventListener('click', async () => render(await window.settings.save()));
   $('openConfig').addEventListener('click', () => window.settings.openConfig());
   $('close').addEventListener('click', () => window.settings.close());
 
