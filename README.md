@@ -159,10 +159,11 @@ the running app creates or closes windows to match on save.
 - `fit` — `cover` crops to fill the window, `contain` shows the whole frame
   letterboxed, `fill` stretches it. If a camera's shape doesn't match the window,
   **Match window to camera** in Settings resizes the window instead of cropping
-- `pan_x` / `pan_y` — which part of the image is shown, 0–100. `50` is centred;
-  higher looks further right / further down, like panning a camera
-- `zoom` — scales the image beyond its fit, 1–4. This is what gives pan room to
-  move; see below
+- `pan_x` / `pan_y` — where the image sits in the window, 0–100. `50` is centred;
+  higher looks further right / further down, like panning a camera. Works at any
+  zoom; see below
+- `zoom` — scales the image beyond its fit, 1–4. Higher means real crop to pan
+  through, so no empty space appears at the extremes
 - `corner_margin` — gap left between a window and the screen edge when snapping
   to a corner (global)
 
@@ -216,22 +217,24 @@ lists devices by id until you show one.
 
 ## Zoom and pan
 
-Pan slides the image through whatever **overscan** exists — the part of the frame
-that doesn't fit in the window. How much overscan you have depends on the shapes
-involved, which is why pan can look like it only works in one direction:
+Pan always moves the image, at any zoom. `50` is centred on both axes.
 
-- A 16:9 camera in a window **narrower** than 16:9 is scaled to match the window's
-  height, so the width overflows. You get horizontal overscan and **none vertically**
-  — Pan Y has nothing to move.
-- A window **wider** than 16:9 is the opposite: vertical overscan, no horizontal.
+It travels over the **overscan** — the part of the frame that doesn't fit in the
+window — plus a free allowance of one window dimension. That allowance is what
+makes pan work when there's no overscan to slide through, which is more common
+than it sounds: a 16:9 camera in a window narrower than 16:9 is scaled to match
+the window's *height*, so the width overflows and the height fits exactly. Nothing
+to crop vertically.
 
-**Zoom** is the fix. Above 100% the image is larger than the window on both axes,
-so both pans have room. 125% is usually enough. The Settings hint says as much
-when zoom is at 100%.
+The cost is that pushing past the overscan leaves empty space, and at 0 or 100
+roughly half the image sits outside the frame. In practice you work in the middle
+of the range. **Zoom** above 100% enlarges the image so there's real crop to move
+through and no gap appears at all — 125% is usually plenty.
 
 Sizes and offsets are computed in the renderer rather than left to CSS
-`object-fit` / `object-position`, because those only ever expose the slack the fit
-happens to leave and can't be combined with a zoom.
+`object-fit` / `object-position`. Those only ever expose the slack the fit happens
+to leave, can't be combined with a zoom, and can't pan past an edge. One piece of
+arithmetic handles fit, zoom and pan together.
 
 ## Capture resolution
 

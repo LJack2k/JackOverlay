@@ -109,6 +109,11 @@
   // which part of the overscan is on screen.
   const layout = { fit: 'cover', zoom: 1, panX: 50, panY: 50 };
 
+  // Extra pan travel beyond the overscan, as a fraction of the window. 1 means
+  // the extremes push the image half out of frame, which is about as far as is
+  // useful. 0 would restore "pan only within the crop".
+  const FREE_TRAVEL = 1;
+
   const clamp = (v, lo, hi, fallback) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
@@ -137,12 +142,21 @@
       ih = vh * scale;
     }
 
-    // Overscan is what pan slides through. Where there is none the image is
-    // centred instead, so pan simply has no effect rather than tearing a gap.
+    // Pan travels over the overscan *plus* a free allowance of one window
+    // dimension, so the image can always be repositioned — even at 100% zoom,
+    // where a 16:9 camera in a narrow window has no vertical overscan at all.
+    // Past the overscan the image simply leaves a gap, which is the price of
+    // being able to move it.
+    //
+    // Expressed as an offset from centre so that 50 is always centred, and so
+    // that with FREE_TRAVEL at 0 this reduces exactly to sliding through the
+    // overscan (pan 0 flush to the left/top edge).
     const ox = iw - cw;
     const oy = ih - ch;
-    const left = ox > 0 ? -(layout.panX / 100) * ox : (cw - iw) / 2;
-    const top  = oy > 0 ? -(layout.panY / 100) * oy : (ch - ih) / 2;
+    const rangeX = ox + cw * FREE_TRAVEL;
+    const rangeY = oy + ch * FREE_TRAVEL;
+    const left = (cw - iw) / 2 + (0.5 - layout.panX / 100) * rangeX;
+    const top  = (ch - ih) / 2 + (0.5 - layout.panY / 100) * rangeY;
 
     video.style.width  = iw + 'px';
     video.style.height = ih + 'px';

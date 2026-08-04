@@ -393,8 +393,8 @@
       $('zoom').value = zoomPct;
       $('zoomVal').textContent = zoomPct + '%';
       $('zoomNote').textContent = zoomPct > 100
-        ? 'Crops in, which is what gives Pan room to move.'
-        : 'At 100% Pan only moves where the fit already crops — often sideways only.';
+        ? 'Crops in, so Pan can reframe without leaving a gap.'
+        : 'At 100% Pan still works, but far from centre it leaves empty space.';
 
       $('panX').value = oc.pan_x ?? 50;
       $('panY').value = oc.pan_y ?? 50;
@@ -403,7 +403,8 @@
       $('recentre').disabled = (oc.pan_x ?? 50) === 50 && (oc.pan_y ?? 50) === 50;
       $('panNote').textContent = oc.fit === 'fill'
         ? 'No effect on “Stretch” — the image already fills the window.'
-        : 'Moves the visible part of the image. Higher looks further right / down.';
+        : 'Higher looks further right / down. Past the cropped area it leaves a gap;'
+          + ' raise Zoom to avoid that.';
 
       const v = os.video;
       $('fitCam').disabled = !v;

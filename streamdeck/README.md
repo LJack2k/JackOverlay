@@ -41,10 +41,10 @@ Two knob actions:
 | **Pan X** | Keypad + Encoder | Moves the visible crop left/right in 2% steps; push/touch centres that axis. |
 | **Pan Y** | Keypad + Encoder | Same, vertically. |
 
-Pan slides the image through whatever overscan exists, and higher values look
-further right / further down, the way panning a camera does. **A 16:9 camera in a
-window narrower than 16:9 has no vertical overscan at all**, so Pan Y does nothing
-until Zoom is above 100% — 125% is usually enough.
+Pan works at any zoom, and higher values look further right / further down, the way
+panning a camera does. Pushing beyond the cropped area leaves empty space, so Zoom
+above 100% is worth having when you want to reframe without a gap — 125% is usually
+enough.
 
 Both knobs declare `Controllers: ["Keypad", "Encoder"]`, so the same action works on
 a plain keypad and on a Stream Deck + dial. On a dial they render through the
