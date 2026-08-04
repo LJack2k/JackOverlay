@@ -318,9 +318,43 @@
   // its capture light is off and the device is free for other apps.
   let visible = true;
   let cameraId = null;
+  // Kept alongside the id so the same physical camera can be found again if
+  // Chromium reissues ids — see resolveCameraId().
+  let cameraLabel = null;
+
+  /**
+   * Chromium salts device ids per profile, so an id saved by a different build —
+   * or after the profile is reset — won't resolve even though the very same camera
+   * is plugged in. The stored label is what identifies it across that, so match on
+   * the label instead and report the corrected id back so it gets saved.
+   *
+   * This finds the *same* device under a new id. It is not switching cameras: if
+   * the label doesn't match anything either, the saved id is returned unchanged so
+   * startCamera fails and says so.
+   *
+   * Caveat: labels are only readable once something has been granted camera
+   * access, so on a brand-new profile where the id is already stale there is
+   * nothing to match against and the camera has to be picked again by hand.
+   */
+  async function resolveCameraId() {
+    if (!cameraId) return null;
+    try {
+      const inputs = (await navigator.mediaDevices.enumerateDevices())
+        .filter((d) => d.kind === 'videoinput');
+      if (inputs.some((d) => d.deviceId === cameraId)) return cameraId;
+
+      const match = cameraLabel && inputs.find((d) => d.label && d.label === cameraLabel);
+      if (match) {
+        cameraId = match.deviceId;
+        window.api.reportCameraId(match.deviceId, match.label);
+        return match.deviceId;
+      }
+    } catch (_) {}
+    return cameraId;
+  }
 
   async function activate() {
-    await startCamera(cameraId);
+    await startCamera(await resolveCameraId());
     await reportCameras();
   }
 
@@ -331,8 +365,9 @@
     else releaseCamera();
   });
 
-  window.api.onSetCamera((id) => {
-    cameraId = id;
+  window.api.onSetCamera((sel) => {
+    cameraId    = sel?.id ?? null;
+    cameraLabel = sel?.label ?? null;
     // Don't wake the device just to honour a setting change while hidden; the
     // new camera is picked up when the overlay is shown again.
     if (visible) activate();
@@ -403,6 +438,7 @@
     } catch (_) {}
 
     cameraId = cfg?.camera_id ?? null;
+    cameraLabel = cfg?.camera_label ?? null;
     visible  = cfg?.visible !== false;
 
     // An overlay restored in the hidden state never opens its camera at all —

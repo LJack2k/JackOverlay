@@ -1,12 +1,19 @@
 {
   "name": "webcam-overlay",
+  "productName": "JackOverlay",
   "version": "1.0.0",
-  "description": "Floating borderless always-on-top webcam window",
+  "description": "Floating borderless always-on-top webcam overlays, with Stream Deck control",
   "main": "main.js",
+  "author": "LJack2k",
+  "license": "MIT",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "icon": "pwsh -NoProfile -File tools/make-appicon.ps1",
+    "package": "npm run icon && node tools/package.js",
+    "package:only": "node tools/package.js"
   },
   "devDependencies": {
+    "@electron/packager": "^20.1.1",
     "electron": "^31.0.0"
   }
 }

@@ -1,6 +1,11 @@
 # Dependencies — restore with `npm install` (see README)
 node_modules/
 
+# Packaged output and generated build assets. Both are reproducible:
+# `npm run package` regenerates the icon and the app folder.
+/dist/
+/build/
+
 # Per-machine runtime state. main.js recreates this with defaults on first run,
 # and it holds this machine's window position/size, so it should not be shared.
 /config.json

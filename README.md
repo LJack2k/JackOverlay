@@ -36,6 +36,42 @@ npm start
 
 `config.json` is created automatically on first run.
 
+## Building an exe
+
+```bash
+npm run package
+```
+
+That regenerates the icon and produces a portable folder,
+`dist/JackOverlay-win32-x64/`, containing `JackOverlay.exe`. Copy the folder
+anywhere and run it — no installer, no admin rights.
+
+It uses [`@electron/packager`](https://github.com/electron/packager) rather than
+electron-builder deliberately: it reuses the Electron build already in the local
+cache and downloads nothing else — no NSIS, no signing tools. The downside is a
+folder rather than a single-file installer.
+
+Run from source, settings live next to `main.js`. **Packaged, they move to
+`%APPDATA%\JackOverlay`**, because a packaged app's own directory is inside a
+read-only `app.asar`. To carry your setup across, copy `config.json` there.
+
+Two things to know when you switch to the exe:
+
+- **Re-tick Start with Windows.** The startup entry records an absolute path, and
+  the exe's differs from `electron.exe` plus the project folder.
+- Chromium salts camera device ids per profile, so the ids in a config copied from
+  the source build won't match. The app re-finds each camera by its stored label
+  and rewrites the id, which it logs — but if a camera can't be matched, pick it
+  again in Settings.
+
+If Windows is holding a handle on a previous build's `app.asar` (antivirus does
+this occasionally, with no process visibly owning it) the build fails to overwrite.
+Either retry later or send it elsewhere:
+
+```bash
+PACKAGE_OUT=build/app npm run package
+```
+
 ## Controls
 
 | | |

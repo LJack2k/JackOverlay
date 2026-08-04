@@ -13,8 +13,20 @@ const { startControlServer } = require('./control-server');
 // Constants
 // ---------------------------------------------------------------------------
 
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-const LOG_PATH    = path.join(__dirname, 'webcam-overlay.log');
+// Pin the name before anything asks for a path. getPath('userData') derives from
+// it, and left to Electron's own timing the answer differed between the first and
+// later runs — which meant the config was looked for in one place and Chromium's
+// profile lived in another.
+app.setName('JackOverlay');
+
+// Packaged, __dirname points inside app.asar, which is read-only — writing the
+// config there would fail silently for every save. Run from source it stays next
+// to main.js so `npm start` behaves exactly as before.
+const DATA_DIR = app.isPackaged ? app.getPath('userData') : __dirname;
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (_) {}
+
+const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
+const LOG_PATH    = path.join(DATA_DIR, 'webcam-overlay.log');
 const LOG_MAX     = 512 * 1024;   // rotate past this, keeping one .old
 
 // Config is held in memory and flushed at most this often, to keep SSD writes
@@ -434,7 +446,9 @@ function setCamera(ov, id, label) {
   conf.camera_id    = id    || null;
   conf.camera_label = label || null;
   saveConfig();
-  if (ov.win && !ov.win.isDestroyed()) ov.win.webContents.send('set-camera', conf.camera_id);
+  if (ov.win && !ov.win.isDestroyed()) {
+    ov.win.webContents.send('set-camera', { id: conf.camera_id, label: conf.camera_label });
+  }
   pushSettings();
   broadcastState();
 }
@@ -964,7 +978,7 @@ function reloadConfigFromDisk() {
     applyFit(ov);
     applyZoom(ov);
     applyPan(ov);
-    ov.win.webContents.send('set-camera', conf.camera_id);
+    ov.win.webContents.send('set-camera', { id: conf.camera_id, label: conf.camera_label });
 
     // Raw show/hide rather than the helpers: those persist, which would write
     // the file straight back during a reload of that same file.
@@ -1355,6 +1369,22 @@ ipcMain.on('video-size', (event, size) => {
   if (!ov || !size || !size.width || !size.height) return;
   ov.video = { width: size.width, height: size.height };
   log(`  ${ov.id}: stream ${size.width}×${size.height}`);
+  pushSettings();
+  broadcastState();
+});
+
+// The renderer matched the saved camera by label under a freshly-salted device id
+// (ids are per-profile, so a config carried between builds has stale ones). Record
+// the corrected id so the lookup isn't needed next time.
+ipcMain.on('camera-id', (event, sel) => {
+  const ov = overlayFor(event);
+  if (!ov || !sel || !sel.id) return;
+  const conf = confOf(ov);
+  if (conf.camera_id === sel.id) return;
+  log(`${ov.id}: camera id changed, re-matched "${sel.label}" by label`);
+  conf.camera_id    = sel.id;
+  conf.camera_label = sel.label || conf.camera_label;
+  saveConfig();
   pushSettings();
   broadcastState();
 });

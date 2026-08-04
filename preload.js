@@ -17,7 +17,9 @@ contextBridge.exposeInMainWorld('api', {
 
   // Camera list / selection
   reportCameras:   (list)   => ipcRenderer.send('cameras-reported', list),
-  onSetCamera:     (cb)     => ipcRenderer.on('set-camera', (_e, id) => cb(id)),
+  onSetCamera:     (cb)     => ipcRenderer.on('set-camera', (_e, sel) => cb(sel)),
+  // The renderer found the saved camera under a new device id.
+  reportCameraId:  (id, label) => ipcRenderer.send('camera-id', { id, label }),
 
   // Window move / resize, driven from the renderer (see index.html)
   moveStart:       ()       => ipcRenderer.send('move-start'),
