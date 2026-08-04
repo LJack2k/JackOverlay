@@ -272,7 +272,8 @@
       <label class="name">
         Always on top
         <span class="sub">Windows drops overlays out of the topmost band when a
-          fullscreen app takes the foreground. This puts them back.</span>
+          fullscreen app takes the foreground. This puts them back. Use it once focus
+          has left the game — Windows refuses while the game is in front.</span>
       </label>
       <button id="reassert">Bring back on top</button>
     </div>
@@ -460,9 +461,10 @@
     const keepTop = c.keep_on_top_seconds ?? 0;
     $('keepTop').value = keepTop;
     $('keepTopNote').textContent = keepTop > 0
-      ? `Seconds. How long it stays buried after you tab out of a fullscreen game. `
-        + `0 turns this off.`
-      : 'Off — use the button above when it happens. Set a number of seconds to automate it.';
+      ? `Every ${keepTop}s. Careful: this strips always-on-top from an overlay that `
+        + `is working over a fullscreen game. 0 is recommended.`
+      : 'Off, and best left off — a timer breaks overlays over fullscreen games. '
+        + 'Use the button above instead.';
 
     $('port').value = c.control_port ?? 0;
     $('configPath').textContent = s.configPath;

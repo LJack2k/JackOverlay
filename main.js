@@ -134,11 +134,14 @@ const DEFAULT_CONFIG = {
   editor: null,
   // Loopback port external controllers talk to. 0 disables the control server.
   control_port: 28492,
-  // How often to re-assert always-on-top, in seconds. 0 turns the watchdog off.
-  // Windows drops a window out of the topmost band when a fullscreen app takes the
-  // foreground — a game, usually — and nothing puts it back, so the overlay stays
-  // buried behind ordinary windows after you tab out. This is how long that lasts.
-  keep_on_top_seconds: 0.5,
+  // How often to re-assert always-on-top, in seconds. 0 (the default) turns the
+  // watchdog off, and off is the right default: re-asserting has to clear the flag
+  // to force Electron to re-apply it, and while a fullscreen app holds the
+  // foreground Windows permits the clear but refuses the set. A periodic re-assert
+  // therefore destroys a perfectly good always-on-top overlay for the duration of a
+  // game, which is precisely when it matters. Use the menu item or the Settings
+  // button instead — by then the flag is already gone, so there is nothing to lose.
+  keep_on_top_seconds: 0,
   overlays: [defaultOverlay('main', 'Main')]
 };
 
@@ -616,10 +619,11 @@ function saveVisibility(ov) {
  * isAlwaysOnTop() as true afterwards — so there is nothing to test, the flag has
  * to be cleared and set again to force it to be re-applied.
  *
- * Note this cannot win while the fullscreen app still *has* the foreground:
- * Windows refuses to promote anything above it, so the call quietly does nothing.
- * It takes effect the moment focus moves elsewhere, which is why the watchdog runs
- * often rather than waiting for an event it has no way to observe.
+ * That clear is destructive and asymmetric, which is why this must not be called on
+ * a timer by default. While a fullscreen app holds the foreground Windows allows the
+ * clear but refuses the set, so a periodic re-assert strips the flag from an overlay
+ * that was working and cannot restore it until focus leaves the game. Called from a
+ * menu item or button the trade is fine: the flag has already been lost by then.
  */
 function reassertOnTop(ov) {
   if (!ov.win || ov.win.isDestroyed() || !ov.win.isVisible()) return;
