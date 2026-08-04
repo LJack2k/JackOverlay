@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   onMirror:        (cb)     => ipcRenderer.on('mirror', (_e, on) => cb(on)),
   onFit:           (cb)     => ipcRenderer.on('fit', (_e, fit) => cb(fit)),
   onVisible:       (cb)     => ipcRenderer.on('visible', (_e, on) => cb(on)),
+  onPan:           (cb)     => ipcRenderer.on('pan', (_e, pan) => cb(pan)),
   reportVideoSize: (w, h)   => ipcRenderer.send('video-size', { width: w, height: h }),
 
   // Camera list / selection

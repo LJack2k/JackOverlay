@@ -38,6 +38,18 @@ function New-RoundedPath([single]$x, [single]$y, [single]$w, [single]$h, [single
   return $p
 }
 
+function Fill-Triangle($g, $brush, $points) {
+  # The array MUST be cast, or PowerShell binds the single-Point overload of
+  # AddPolygon and throws.
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $pts = [System.Drawing.PointF[]]@($points | ForEach-Object {
+    [System.Drawing.PointF]::new($_[0], $_[1])
+  })
+  $path.AddPolygon($pts)
+  $g.FillPath($brush, $path)
+  $path.Dispose()
+}
+
 function Draw-Camera($g, [System.Drawing.Color]$c) {
   $brush = New-Object System.Drawing.SolidBrush $c
   $body = New-RoundedPath 10 20 38 30 7
@@ -117,6 +129,29 @@ function Draw-Corner($g, [string]$vert, [string]$horiz,
   $box = New-RoundedPath $x $y 20 14 3
   $g.FillPath($brush, $box)
   $box.Dispose(); $brush.Dispose()
+}
+
+# Screen outline with a double-headed arrow across it: pan the image inside the frame.
+function Draw-Pan($g, [bool]$horizontal) {
+  $pen = New-Object System.Drawing.Pen $FrameOn, 4
+  $outline = New-RoundedPath 6 12 60 44 5
+  $g.DrawPath($pen, $outline)
+  $outline.Dispose(); $pen.Dispose()
+
+  # Hand-drawn rather than AdjustableArrowCap: the frame leaves only ~30px for the
+  # vertical arrow, and cap-based heads at that length consume the whole shaft and
+  # render as a diamond.
+  $brush = New-Object System.Drawing.SolidBrush $White
+  if ($horizontal) {
+    $g.FillRectangle($brush, 24, 31, 24, 6)
+    Fill-Triangle $g $brush @(@(15,34), @(26,27), @(26,41))
+    Fill-Triangle $g $brush @(@(57,34), @(46,27), @(46,41))
+  } else {
+    $g.FillRectangle($brush, 33, 26, 6, 16)
+    Fill-Triangle $g $brush @(@(36,15), @(29,26), @(43,26))
+    Fill-Triangle $g $brush @(@(36,53), @(29,42), @(43,42))
+  }
+  $brush.Dispose()
 }
 
 function Draw-Opacity($g) {
@@ -211,6 +246,14 @@ $icons = @(
   @{ rel = 'imgs/actions/opacity/icon';    size = 20; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/key';     size = 72; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/encoder'; size = 72; draw = { param($g) Draw-Opacity $g } },
+
+  @{ rel = 'imgs/actions/panx/icon';       size = 20; draw = { param($g) Draw-Pan $g $true } },
+  @{ rel = 'imgs/actions/panx/key';        size = 72; draw = { param($g) Draw-Pan $g $true } },
+  @{ rel = 'imgs/actions/panx/encoder';    size = 72; draw = { param($g) Draw-Pan $g $true } },
+
+  @{ rel = 'imgs/actions/pany/icon';       size = 20; draw = { param($g) Draw-Pan $g $false } },
+  @{ rel = 'imgs/actions/pany/key';        size = 72; draw = { param($g) Draw-Pan $g $false } },
+  @{ rel = 'imgs/actions/pany/encoder';    size = 72; draw = { param($g) Draw-Pan $g $false } },
 
   @{ rel = 'imgs/actions/radius/icon';     size = 20; draw = { param($g) Draw-Radius $g } },
   @{ rel = 'imgs/actions/radius/key';      size = 72; draw = { param($g) Draw-Radius $g } },

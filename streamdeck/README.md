@@ -37,6 +37,12 @@ Two knob actions:
 |---|---|---|
 | **Opacity** | Keypad + Encoder | Dial adjusts in 5% steps, push/touch resets to 100%. On a key, press cycles 40 → 60 → 80 → 100%. |
 | **Corner Radius** | Keypad + Encoder | Dial adjusts in 2px steps, push/touch resets to 16px. On a key, press cycles the presets. |
+| **Pan X** | Keypad + Encoder | Moves the visible crop left/right in 2% steps; push/touch centres that axis. |
+| **Pan Y** | Keypad + Encoder | Same, vertically. |
+
+Pan only bites where the image is actually cropped — both axes under `cover`, the
+letterboxed axis under `contain`, neither under `fill`. Higher values look further
+right / further down, the way panning a camera does.
 
 Both knobs declare `Controllers: ["Keypad", "Encoder"]`, so the same action works on
 a plain keypad and on a Stream Deck + dial. On a dial they render through the
@@ -123,6 +129,9 @@ Commands the plugin sends:
 | `setMirror` / `toggleMirror` | `enabled` | Flip the image left-to-right |
 | `setFit` | `fit` | `cover` / `contain` / `fill` |
 | `fitToCamera` | — | Resize the window to the stream's aspect ratio |
+| `setPan` | `x` and/or `y` | Absolute pan, 0–100. Omitting an axis leaves it alone |
+| `nudgePan` | `dx` and/or `dy` | Relative pan |
+| `recentre` | — | Both pan axes back to 50 |
 | `openSettings` | — | Open the settings window |
 | `addOverlay` | — | Create another overlay window |
 | `removeOverlay` | `overlay` | Close one and drop it from the config (the last one can't be removed) |
@@ -145,6 +154,7 @@ The overlay pushes this on connect and after every change:
   "overlays": [
     { "id": "main", "name": "Main", "mode": "windowed", "visible": true,
       "opacity": 1, "radius": 16, "mirror": false, "fit": "cover",
+      "pan_x": 50, "pan_y": 50,
       "corner": "bottom-right", "camera": "Insta360 Link 2 Pro",
       "video": { "width": 1920, "height": 1080 } }
   ]

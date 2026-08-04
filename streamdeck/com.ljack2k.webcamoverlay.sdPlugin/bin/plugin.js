@@ -220,23 +220,35 @@ const CORNER_BUTTONS = [
  */
 class KnobAction extends OverlayAction {
 	/**
+	 * `nudgeArgs` / `setArgs` build the command payload, because not every knob
+	 * takes a bare {delta}/{value} — pan is one command with two named axes.
+	 *
 	 * @type {{
 	 *   title: string, nudge: string, set: string,
-	 *   step: number, reset: number, presets: number[]
+	 *   step: number, reset: number, presets: number[],
+	 *   nudgeArgs?: (delta: number) => object,
+	 *   setArgs?: (value: number) => object
 	 * }}
 	 */
 	config = null;
 
+	#nudgeArgs(delta) {
+		return this.config.nudgeArgs ? this.config.nudgeArgs(delta) : { delta };
+	}
+
+	#setArgs(value) {
+		return this.config.setArgs ? this.config.setArgs(value) : { value };
+	}
+
 	async onDialRotate(ev) {
 		const delta = this.config.step * (ev.payload.ticks ?? 0);
-		if (!overlay.send(this.config.nudge, this.argsFor(ev.action, { delta }))) {
+		if (!overlay.send(this.config.nudge, this.argsFor(ev.action, this.#nudgeArgs(delta)))) {
 			await this.fail(ev.action);
 		}
 	}
 
 	async onDialDown(ev) {
-		const value = this.config.reset;
-		if (!overlay.send(this.config.set, this.argsFor(ev.action, { value }))) {
+		if (!overlay.send(this.config.set, this.argsFor(ev.action, this.#setArgs(this.config.reset)))) {
 			await this.fail(ev.action);
 		}
 	}
@@ -251,7 +263,7 @@ class KnobAction extends OverlayAction {
 		const presets = this.config.presets;
 		// Next preset strictly above the current value, wrapping around.
 		const value = presets.find((p) => p > cur + 1e-6) ?? presets[0];
-		if (!overlay.send(this.config.set, this.argsFor(ev.action, { value }))) {
+		if (!overlay.send(this.config.set, this.argsFor(ev.action, this.#setArgs(value)))) {
 			await this.fail(ev.action);
 		}
 	}
@@ -324,6 +336,40 @@ class Radius extends KnobAction {
 	}
 }
 
+/**
+ * Moves the visible crop inside the overlay. Higher values look further right /
+ * further down, the same way panning a camera does. Only bites where the image is
+ * actually cropped — see the fit setting.
+ */
+class PanAction extends KnobAction {
+	constructor(axis) {
+		super();
+		const upper = axis.toUpperCase();
+		this.manifestId = `com.ljack2k.webcamoverlay.pan${axis}`;
+		this.config = {
+			title: `Pan ${upper}`,
+			nudge: "nudgePan",
+			set: "setPan",
+			nudgeArgs: (delta) => ({ [`d${axis}`]: delta }),
+			setArgs: (value) => ({ [axis]: value }),
+			step: 2,
+			reset: 50,
+			presets: [0, 25, 50, 75, 100],
+		};
+		this.axis = axis;
+	}
+
+	value(st) {
+		return st?.[`pan_${this.axis}`] ?? 50;
+	}
+	percent(st) {
+		return Math.round(this.value(st));   // already 0-100
+	}
+	label(st) {
+		return `${this.value(st)}%`;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Property inspector
 // ---------------------------------------------------------------------------
@@ -348,6 +394,8 @@ for (const action of [
 	...CORNER_BUTTONS.map(([id, corner]) => new CornerButton(id, corner)),
 	new Opacity(),
 	new Radius(),
+	new PanAction("x"),
+	new PanAction("y"),
 ]) {
 	allActions.push(action);
 	streamDeck.actions.registerAction(action);

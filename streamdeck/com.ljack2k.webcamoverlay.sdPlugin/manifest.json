@@ -1,7 +1,7 @@
 {
   "UUID": "com.ljack2k.webcamoverlay",
   "Name": "Webcam Overlay",
-  "Version": "1.4.0.0",
+  "Version": "1.5.0.0",
   "Author": "LJack2k",
   "Description": "Control the floating webcam overlay — show, hide, maximize, window mode, opacity and corner radius. Each button lights up while the overlay is in that state.",
   "Category": "Webcam Overlay",
@@ -136,6 +136,44 @@
           "Rotate": "Adjust opacity",
           "Push": "Reset to 100%",
           "Touch": "Reset to 100%"
+        }
+      }
+    },
+    {
+      "UUID": "com.ljack2k.webcamoverlay.panx",
+      "Name": "Pan X",
+      "Tooltip": "Rotate to move the image left/right inside the overlay; press to recentre",
+      "Icon": "imgs/actions/panx/icon",
+      "Controllers": ["Keypad", "Encoder"],
+      "States": [
+        { "Image": "imgs/actions/panx/key", "TitleAlignment": "bottom" }
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/panx/encoder",
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Pan horizontally",
+          "Push": "Centre horizontally",
+          "Touch": "Centre horizontally"
+        }
+      }
+    },
+    {
+      "UUID": "com.ljack2k.webcamoverlay.pany",
+      "Name": "Pan Y",
+      "Tooltip": "Rotate to move the image up/down inside the overlay; press to recentre",
+      "Icon": "imgs/actions/pany/icon",
+      "Controllers": ["Keypad", "Encoder"],
+      "States": [
+        { "Image": "imgs/actions/pany/key", "TitleAlignment": "bottom" }
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/pany/encoder",
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Pan vertically",
+          "Push": "Centre vertically",
+          "Touch": "Centre vertically"
         }
       }
     },

@@ -169,6 +169,26 @@
       <button id="fitCam">Resize</button>
     </div>
     <div class="row">
+      <label class="name" for="panX">
+        Pan X
+        <span class="sub" id="panNote"></span>
+      </label>
+      <input type="range" id="panX" min="0" max="100" step="1">
+      <span class="val" id="panXVal"></span>
+    </div>
+    <div class="row">
+      <label class="name" for="panY">Pan Y</label>
+      <input type="range" id="panY" min="0" max="100" step="1">
+      <span class="val" id="panYVal"></span>
+    </div>
+    <div class="row">
+      <label class="name">
+        Recentre image
+        <span class="sub">Puts both axes back to 50%.</span>
+      </label>
+      <button id="recentre">Centre</button>
+    </div>
+    <div class="row">
       <label class="name" for="mirror">
         Mirror image
         <span class="sub">Flip left-to-right. Natural for a face cam; leave off for
@@ -359,6 +379,15 @@
         fill:    'Stretches to the window — distorts the image.'
       }[oc.fit || 'cover'];
 
+      $('panX').value = oc.pan_x ?? 50;
+      $('panY').value = oc.pan_y ?? 50;
+      $('panXVal').textContent = $('panX').value + '%';
+      $('panYVal').textContent = $('panY').value + '%';
+      $('recentre').disabled = (oc.pan_x ?? 50) === 50 && (oc.pan_y ?? 50) === 50;
+      $('panNote').textContent = oc.fit === 'fill'
+        ? 'No effect on “Stretch” — the image already fills the window.'
+        : 'Moves the visible part of the image. Higher looks further right / down.';
+
       const v = os.video;
       $('fitCam').disabled = !v;
       $('fitCamNote').textContent = v
@@ -431,6 +460,18 @@
   });
 
   $('fitCam').addEventListener('click', () => applyToSel({ fitToCamera: true }));
+
+  $('panX').addEventListener('input', (e) => {
+    $('panXVal').textContent = e.target.value + '%';
+    if (!loading) applyToSel({ pan_x: Number(e.target.value) });
+  });
+
+  $('panY').addEventListener('input', (e) => {
+    $('panYVal').textContent = e.target.value + '%';
+    if (!loading) applyToSel({ pan_y: Number(e.target.value) });
+  });
+
+  $('recentre').addEventListener('click', () => applyToSel({ recentre: true }));
 
   for (const b of document.querySelectorAll('[data-corner]')) {
     b.addEventListener('click', () => applyToSel({ corner: b.dataset.corner }));

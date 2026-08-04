@@ -62,7 +62,7 @@ Right-click the overlay (or the tray icon) → **Settings…**
 | Section | What's there |
 |---|---|
 | **Overlays** | A tab per overlay plus **+ Add overlay**. Rename it, pick its webcam, or remove it. A saved camera that's currently unplugged stays listed as *not connected* rather than silently switching. |
-| **Appearance** | Opacity, corner radius, image fit, mirroring, and **Match window to camera** for the selected overlay. |
+| **Appearance** | Opacity, corner radius, image fit, mirroring, pan X/Y, and **Match window to camera** for the selected overlay. |
 | **Position & size** | The four corner presets, width/height, and the corner margin. |
 | **Hotkeys** | Both accelerators, each with an **active** / **taken** badge showing whether it actually registered. |
 | **System** | Start with Windows, config editor, control port. |
@@ -110,6 +110,8 @@ The path is absolute, so **re-tick it if you move the project folder**.
       "corner_radius": 16,
       "mirror": false,
       "fit": "cover",
+      "pan_x": 50,
+      "pan_y": 50,
       "camera_id": null,
       "camera_label": null
     }
@@ -133,6 +135,9 @@ the running app creates or closes windows to match on save.
 - `fit` — `cover` crops to fill the window, `contain` shows the whole frame
   letterboxed, `fill` stretches it. If a camera's shape doesn't match the window,
   **Match window to camera** in Settings resizes the window instead of cropping
+- `pan_x` / `pan_y` — which part of the image is shown, 0–100. `50` is centred;
+  higher looks further right / further down, like panning a camera. Only has an
+  effect where the image is cropped or letterboxed — nothing to pan under `fill`
 - `corner_margin` — gap left between a window and the screen edge when snapping
   to a corner (global)
 

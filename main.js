@@ -63,6 +63,11 @@ function defaultOverlay(id, name) {
     // How the image fills the window: 'cover' crops to fill, 'contain' shows the
     // whole frame letterboxed, 'fill' stretches (and distorts).
     fit: 'cover',
+    // Which part of the image is shown, as CSS object-position percentages.
+    // 50/50 is centred; 0 pins the left/top edge, 100 the right/bottom. Only has
+    // an effect where the image is actually cropped or letterboxed.
+    pan_x: 50,
+    pan_y: 50,
     // The id selects the device; the label is kept so the right camera can be
     // found again if Chromium reissues device ids.
     camera_id:    null,
@@ -270,6 +275,23 @@ function setFit(ov, fit) {
   confOf(ov).fit = fit;
   saveConfig(cfg);
   applyFit(ov);
+  broadcastState();
+}
+
+function applyPan(ov) {
+  if (ov.win && !ov.win.isDestroyed()) {
+    const conf = confOf(ov);
+    ov.win.webContents.send('pan', { x: conf.pan_x, y: conf.pan_y });
+  }
+}
+
+/** Either axis may be omitted to leave it alone. */
+function setPan(ov, x, y) {
+  const conf = confOf(ov);
+  if (x !== undefined && x !== null) conf.pan_x = Math.round(clamp(x, 0, 100));
+  if (y !== undefined && y !== null) conf.pan_y = Math.round(clamp(y, 0, 100));
+  saveConfig(cfg);
+  applyPan(ov);
   broadcastState();
 }
 
@@ -628,6 +650,7 @@ function createOverlay(conf) {
     applyCornerRadius(ov);
     applyMirror(ov);
     applyFit(ov);
+    applyPan(ov);
   });
 
   // Native edge-resize still fires these; renderer-driven move/resize saves on
@@ -711,6 +734,8 @@ function overlayState(ov) {
     radius:  conf.corner_radius,
     mirror:  !!conf.mirror,
     fit:     conf.fit,
+    pan_x:   conf.pan_x,
+    pan_y:   conf.pan_y,
     corner:  currentCorner(ov),
     camera:  conf.camera_label,
     // Intrinsic size of the live stream, once the renderer has reported it.
@@ -775,6 +800,16 @@ function handleControlCommand(msg) {
       case 'toggleMirror':     setMirror(ov, !confOf(ov).mirror); break;
       case 'setFit':           setFit(ov, String(msg.fit)); break;
       case 'fitToCamera':      fitWindowToCamera(ov); break;
+      case 'setPan':           setPan(ov, msg.x, msg.y); break;
+      case 'nudgePan': {
+        const conf = confOf(ov);
+        setPan(ov,
+          msg.dx === undefined ? undefined : conf.pan_x + Number(msg.dx || 0),
+          msg.dy === undefined ? undefined : conf.pan_y + Number(msg.dy || 0));
+        break;
+      }
+      case 'recentre':
+      case 'recenter':         setPan(ov, 50, 50); break;
       default:                 return;                // unknown verb: ignore
     }
   }
@@ -823,6 +858,7 @@ function reloadConfigFromDisk() {
     applyCornerRadius(ov);
     applyMirror(ov);
     applyFit(ov);
+    applyPan(ov);
     ov.win.webContents.send('set-camera', conf.camera_id);
 
     // Raw show/hide rather than the helpers: those persist, which would write
@@ -946,7 +982,9 @@ function applySettings(patch) {
     if ('corner_radius' in patch) setCornerRadius(ov, patch.corner_radius);
     if ('mirror'        in patch) setMirror(ov, patch.mirror);
     if ('fit'           in patch) setFit(ov, String(patch.fit));
+    if ('pan_x' in patch || 'pan_y' in patch) setPan(ov, patch.pan_x, patch.pan_y);
     if (patch.fitToCamera)        fitWindowToCamera(ov);
+    if (patch.recentre)           setPan(ov, 50, 50);
     if ('corner'        in patch) snapToCorner(ov, String(patch.corner));
     if ('camera_id'     in patch) setCamera(ov, patch.camera_id, patch.camera_label);
     if ('width' in patch || 'height' in patch) {
@@ -1050,6 +1088,11 @@ function overlayItems(ov) {
         : 'Fit window to camera',
       enabled: !!ov.video,
       click: () => fitWindowToCamera(ov)
+    },
+    {
+      label: `Recentre image  (now ${confOf(ov).pan_x}% / ${confOf(ov).pan_y}%)`,
+      enabled: confOf(ov).pan_x !== 50 || confOf(ov).pan_y !== 50,
+      click: () => setPan(ov, 50, 50)
     }
   );
   return items;
