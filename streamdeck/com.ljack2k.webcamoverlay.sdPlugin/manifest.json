@@ -1,7 +1,7 @@
 {
   "UUID": "com.ljack2k.webcamoverlay",
   "Name": "Webcam Overlay",
-  "Version": "1.5.0.0",
+  "Version": "1.6.0.0",
   "Author": "LJack2k",
   "Description": "Control the floating webcam overlay — show, hide, maximize, window mode, opacity and corner radius. Each button lights up while the overlay is in that state.",
   "Category": "Webcam Overlay",
@@ -134,6 +134,25 @@
         "layout": "$B1",
         "TriggerDescription": {
           "Rotate": "Adjust opacity",
+          "Push": "Reset to 100%",
+          "Touch": "Reset to 100%"
+        }
+      }
+    },
+    {
+      "UUID": "com.ljack2k.webcamoverlay.zoom",
+      "Name": "Zoom",
+      "Tooltip": "Rotate to zoom the image; press to reset to 100%. Zooming in is what gives Pan room to move.",
+      "Icon": "imgs/actions/zoom/icon",
+      "Controllers": ["Keypad", "Encoder"],
+      "States": [
+        { "Image": "imgs/actions/zoom/key", "TitleAlignment": "bottom" }
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/zoom/encoder",
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Zoom in / out",
           "Push": "Reset to 100%",
           "Touch": "Reset to 100%"
         }

@@ -169,6 +169,14 @@
       <button id="fitCam">Resize</button>
     </div>
     <div class="row">
+      <label class="name" for="zoom">
+        Zoom
+        <span class="sub" id="zoomNote"></span>
+      </label>
+      <input type="range" id="zoom" min="100" max="400" step="5">
+      <span class="val" id="zoomVal"></span>
+    </div>
+    <div class="row">
       <label class="name" for="panX">
         Pan X
         <span class="sub" id="panNote"></span>
@@ -379,6 +387,13 @@
         fill:    'Stretches to the window — distorts the image.'
       }[oc.fit || 'cover'];
 
+      const zoomPct = Math.round((oc.zoom ?? 1) * 100);
+      $('zoom').value = zoomPct;
+      $('zoomVal').textContent = zoomPct + '%';
+      $('zoomNote').textContent = zoomPct > 100
+        ? 'Crops in, which is what gives Pan room to move.'
+        : 'At 100% Pan only moves where the fit already crops — often sideways only.';
+
       $('panX').value = oc.pan_x ?? 50;
       $('panY').value = oc.pan_y ?? 50;
       $('panXVal').textContent = $('panX').value + '%';
@@ -460,6 +475,11 @@
   });
 
   $('fitCam').addEventListener('click', () => applyToSel({ fitToCamera: true }));
+
+  $('zoom').addEventListener('input', (e) => {
+    $('zoomVal').textContent = e.target.value + '%';
+    if (!loading) applyToSel({ zoom: Number(e.target.value) / 100 });
+  });
 
   $('panX').addEventListener('input', (e) => {
     $('panXVal').textContent = e.target.value + '%';

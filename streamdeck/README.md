@@ -37,12 +37,14 @@ Two knob actions:
 |---|---|---|
 | **Opacity** | Keypad + Encoder | Dial adjusts in 5% steps, push/touch resets to 100%. On a key, press cycles 40 → 60 → 80 → 100%. |
 | **Corner Radius** | Keypad + Encoder | Dial adjusts in 2px steps, push/touch resets to 16px. On a key, press cycles the presets. |
+| **Zoom** | Keypad + Encoder | Scales the image 100–400% in 5% steps; push/touch resets to 100%. |
 | **Pan X** | Keypad + Encoder | Moves the visible crop left/right in 2% steps; push/touch centres that axis. |
 | **Pan Y** | Keypad + Encoder | Same, vertically. |
 
-Pan only bites where the image is actually cropped — both axes under `cover`, the
-letterboxed axis under `contain`, neither under `fill`. Higher values look further
-right / further down, the way panning a camera does.
+Pan slides the image through whatever overscan exists, and higher values look
+further right / further down, the way panning a camera does. **A 16:9 camera in a
+window narrower than 16:9 has no vertical overscan at all**, so Pan Y does nothing
+until Zoom is above 100% — 125% is usually enough.
 
 Both knobs declare `Controllers: ["Keypad", "Encoder"]`, so the same action works on
 a plain keypad and on a Stream Deck + dial. On a dial they render through the
@@ -131,6 +133,8 @@ Commands the plugin sends:
 | `fitToCamera` | — | Resize the window to the stream's aspect ratio |
 | `setPan` | `x` and/or `y` | Absolute pan, 0–100. Omitting an axis leaves it alone |
 | `nudgePan` | `dx` and/or `dy` | Relative pan |
+| `setZoom` | `value` 1–4 | Absolute zoom |
+| `nudgeZoom` | `delta` | Relative zoom |
 | `recentre` | — | Both pan axes back to 50 |
 | `openSettings` | — | Open the settings window |
 | `addOverlay` | — | Create another overlay window |
@@ -154,7 +158,7 @@ The overlay pushes this on connect and after every change:
   "overlays": [
     { "id": "main", "name": "Main", "mode": "windowed", "visible": true,
       "opacity": 1, "radius": 16, "mirror": false, "fit": "cover",
-      "pan_x": 50, "pan_y": 50,
+      "pan_x": 50, "pan_y": 50, "zoom": 1,
       "corner": "bottom-right", "camera": "Insta360 Link 2 Pro",
       "video": { "width": 1920, "height": 1080 } }
   ]

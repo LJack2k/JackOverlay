@@ -68,6 +68,10 @@ function defaultOverlay(id, name) {
     // an effect where the image is actually cropped or letterboxed.
     pan_x: 50,
     pan_y: 50,
+    // Scales the image beyond its fit, which is what creates room to pan. At 1
+    // there is only whatever slack the fit leaves — for a 16:9 camera in a narrow
+    // window that is horizontal only, so Pan Y needs some zoom to do anything.
+    zoom: 1,
     // The id selects the device; the label is kept so the right camera can be
     // found again if Chromium reissues device ids.
     camera_id:    null,
@@ -283,6 +287,20 @@ function applyPan(ov) {
     const conf = confOf(ov);
     ov.win.webContents.send('pan', { x: conf.pan_x, y: conf.pan_y });
   }
+}
+
+function applyZoom(ov) {
+  if (ov.win && !ov.win.isDestroyed()) {
+    ov.win.webContents.send('zoom', confOf(ov).zoom);
+  }
+}
+
+function setZoom(ov, z) {
+  // Two decimals: the dial steps in 0.05 and JS floats would otherwise drift.
+  confOf(ov).zoom = Math.round(clamp(z, 1, 4) * 100) / 100;
+  saveConfig(cfg);
+  applyZoom(ov);
+  broadcastState();
 }
 
 /** Either axis may be omitted to leave it alone. */
@@ -650,6 +668,7 @@ function createOverlay(conf) {
     applyCornerRadius(ov);
     applyMirror(ov);
     applyFit(ov);
+    applyZoom(ov);
     applyPan(ov);
   });
 
@@ -736,6 +755,7 @@ function overlayState(ov) {
     fit:     conf.fit,
     pan_x:   conf.pan_x,
     pan_y:   conf.pan_y,
+    zoom:    conf.zoom,
     corner:  currentCorner(ov),
     camera:  conf.camera_label,
     // Intrinsic size of the live stream, once the renderer has reported it.
@@ -801,6 +821,8 @@ function handleControlCommand(msg) {
       case 'setFit':           setFit(ov, String(msg.fit)); break;
       case 'fitToCamera':      fitWindowToCamera(ov); break;
       case 'setPan':           setPan(ov, msg.x, msg.y); break;
+      case 'setZoom':          setZoom(ov, msg.value); break;
+      case 'nudgeZoom':        setZoom(ov, confOf(ov).zoom + Number(msg.delta || 0)); break;
       case 'nudgePan': {
         const conf = confOf(ov);
         setPan(ov,
@@ -858,6 +880,7 @@ function reloadConfigFromDisk() {
     applyCornerRadius(ov);
     applyMirror(ov);
     applyFit(ov);
+    applyZoom(ov);
     applyPan(ov);
     ov.win.webContents.send('set-camera', conf.camera_id);
 
@@ -983,6 +1006,7 @@ function applySettings(patch) {
     if ('mirror'        in patch) setMirror(ov, patch.mirror);
     if ('fit'           in patch) setFit(ov, String(patch.fit));
     if ('pan_x' in patch || 'pan_y' in patch) setPan(ov, patch.pan_x, patch.pan_y);
+    if ('zoom'          in patch) setZoom(ov, patch.zoom);
     if (patch.fitToCamera)        fitWindowToCamera(ov);
     if (patch.recentre)           setPan(ov, 50, 50);
     if ('corner'        in patch) snapToCorner(ov, String(patch.corner));
@@ -1088,6 +1112,15 @@ function overlayItems(ov) {
         : 'Fit window to camera',
       enabled: !!ov.video,
       click: () => fitWindowToCamera(ov)
+    },
+    {
+      label: 'Zoom',
+      submenu: [1, 1.25, 1.5, 2, 3].map((z) => ({
+        label:   `${Math.round(z * 100)}%`,
+        type:    'radio',
+        checked: confOf(ov).zoom === z,
+        click:   () => setZoom(ov, z)
+      }))
     },
     {
       label: `Recentre image  (now ${confOf(ov).pan_x}% / ${confOf(ov).pan_y}%)`,

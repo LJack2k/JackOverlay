@@ -337,9 +337,37 @@ class Radius extends KnobAction {
 }
 
 /**
+ * Scales the image beyond its fit. This is what creates room for Pan to move: a
+ * 16:9 camera in a narrow window has horizontal slack but no vertical slack at
+ * all, so Pan Y does nothing until you zoom in a little.
+ */
+class Zoom extends KnobAction {
+	manifestId = "com.ljack2k.webcamoverlay.zoom";
+	config = {
+		title: "Zoom",
+		nudge: "nudgeZoom",
+		set: "setZoom",
+		step: 0.05,
+		reset: 1,
+		presets: [1, 1.25, 1.5, 2, 3],
+	};
+
+	value(st) {
+		return st?.zoom ?? 1;
+	}
+	percent(st) {
+		// Bar spans the usable 1x-4x range.
+		return Math.round(((this.value(st) - 1) / 3) * 100);
+	}
+	label(st) {
+		return `${Math.round(this.value(st) * 100)}%`;
+	}
+}
+
+/**
  * Moves the visible crop inside the overlay. Higher values look further right /
  * further down, the same way panning a camera does. Only bites where the image is
- * actually cropped — see the fit setting.
+ * actually cropped — see the fit and zoom settings.
  */
 class PanAction extends KnobAction {
 	constructor(axis) {
@@ -394,6 +422,7 @@ for (const action of [
 	...CORNER_BUTTONS.map(([id, corner]) => new CornerButton(id, corner)),
 	new Opacity(),
 	new Radius(),
+	new Zoom(),
 	new PanAction("x"),
 	new PanAction("y"),
 ]) {

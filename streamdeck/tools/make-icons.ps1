@@ -154,6 +154,25 @@ function Draw-Pan($g, [bool]$horizontal) {
   $brush.Dispose()
 }
 
+# Magnifier with a plus. Deliberately not another disc or frame — opacity is
+# already a circle and the mode/corner glyphs are already frames.
+function Draw-Zoom($g) {
+  $pen = New-Object System.Drawing.Pen $White, 5
+  $g.DrawEllipse($pen, 16, 12, 32, 32)
+  $pen.Dispose()
+
+  $handle = New-Object System.Drawing.Pen $White, 7
+  $handle.StartCap = 'Round'; $handle.EndCap = 'Round'
+  $g.DrawLine($handle, 44, 40, 56, 52)
+  $handle.Dispose()
+
+  $plus = New-Object System.Drawing.Pen $Accent, 4
+  $plus.StartCap = 'Round'; $plus.EndCap = 'Round'
+  $g.DrawLine($plus, 25, 28, 39, 28)
+  $g.DrawLine($plus, 32, 21, 32, 35)
+  $plus.Dispose()
+}
+
 function Draw-Opacity($g) {
   $pen = New-Object System.Drawing.Pen $White, 4
   $g.DrawEllipse($pen, 12, 12, 48, 48)
@@ -246,6 +265,10 @@ $icons = @(
   @{ rel = 'imgs/actions/opacity/icon';    size = 20; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/key';     size = 72; draw = { param($g) Draw-Opacity $g } },
   @{ rel = 'imgs/actions/opacity/encoder'; size = 72; draw = { param($g) Draw-Opacity $g } },
+
+  @{ rel = 'imgs/actions/zoom/icon';       size = 20; draw = { param($g) Draw-Zoom $g } },
+  @{ rel = 'imgs/actions/zoom/key';        size = 72; draw = { param($g) Draw-Zoom $g } },
+  @{ rel = 'imgs/actions/zoom/encoder';    size = 72; draw = { param($g) Draw-Zoom $g } },
 
   @{ rel = 'imgs/actions/panx/icon';       size = 20; draw = { param($g) Draw-Pan $g $true } },
   @{ rel = 'imgs/actions/panx/key';        size = 72; draw = { param($g) Draw-Pan $g $true } },

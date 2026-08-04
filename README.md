@@ -112,6 +112,7 @@ The path is absolute, so **re-tick it if you move the project folder**.
       "fit": "cover",
       "pan_x": 50,
       "pan_y": 50,
+      "zoom": 1,
       "camera_id": null,
       "camera_label": null
     }
@@ -136,8 +137,9 @@ the running app creates or closes windows to match on save.
   letterboxed, `fill` stretches it. If a camera's shape doesn't match the window,
   **Match window to camera** in Settings resizes the window instead of cropping
 - `pan_x` / `pan_y` — which part of the image is shown, 0–100. `50` is centred;
-  higher looks further right / further down, like panning a camera. Only has an
-  effect where the image is cropped or letterboxed — nothing to pan under `fill`
+  higher looks further right / further down, like panning a camera
+- `zoom` — scales the image beyond its fit, 1–4. This is what gives pan room to
+  move; see below
 - `corner_margin` — gap left between a window and the screen edge when snapping
   to a corner (global)
 
@@ -170,6 +172,25 @@ hidden state never opens a camera at all. Showing it re-acquires.
 One consequence: device *labels* only become readable once something has been
 granted camera access, so if **every** overlay starts hidden the camera dropdown
 lists devices by id until you show one.
+
+## Zoom and pan
+
+Pan slides the image through whatever **overscan** exists — the part of the frame
+that doesn't fit in the window. How much overscan you have depends on the shapes
+involved, which is why pan can look like it only works in one direction:
+
+- A 16:9 camera in a window **narrower** than 16:9 is scaled to match the window's
+  height, so the width overflows. You get horizontal overscan and **none vertically**
+  — Pan Y has nothing to move.
+- A window **wider** than 16:9 is the opposite: vertical overscan, no horizontal.
+
+**Zoom** is the fix. Above 100% the image is larger than the window on both axes,
+so both pans have room. 125% is usually enough. The Settings hint says as much
+when zoom is at 100%.
+
+Sizes and offsets are computed in the renderer rather than left to CSS
+`object-fit` / `object-position`, because those only ever expose the slack the fit
+happens to leave and can't be combined with a zoom.
 
 ## Capture resolution
 
