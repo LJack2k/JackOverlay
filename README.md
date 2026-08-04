@@ -157,20 +157,6 @@ Re-asserting means clearing always-on-top and setting it again, then raising the
 window — setting it again alone is a no-op, because Electron still believes the
 window is topmost when Windows has quietly decided otherwise.
 
-### Exclusive fullscreen is a hard limit
-
-Nothing here can put the overlay above a game running in **exclusive** fullscreen.
-Such a game owns the display's swapchain outright, so the desktop compositor isn't
-drawing the screen and there is nothing for a topmost window to be on top of. What
-you see instead is the overlay flashing up on each re-assert and disappearing again.
-Discord, Steam and OBS only manage it by injecting into the game to draw the overlay
-themselves.
-
-Set the game to **Borderless** / *Windowed Fullscreen* instead. It looks the same,
-costs next to nothing, and the overlay then behaves normally. The watchdog still
-earns its keep either way: leaving such a game used to strand the overlay demoted
-until the app was restarted.
-
 The Stream Deck and anything else on the control channel can trigger it too:
 
 ```bash
