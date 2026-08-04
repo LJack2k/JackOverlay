@@ -15,7 +15,8 @@ it over whatever you're doing.
 - **Settings window** — pick your webcam, and adjust everything else without
   touching a config file
 - Right-click menu: Maximize / Minimize / Window mode / Move to corner /
-  Corner radius / Opacity / Settings / Start with Windows / Exit
+  Corner radius / Opacity / Bring back on top / Settings / Start with Windows / Exit
+- Recovers on its own when Windows drops it out of the topmost band
 - System tray icon with the same menu
 - Global hotkeys — `Ctrl+Alt+M` (maximize ⇄ window), `Ctrl+Alt+W` (show / hide)
 - Configurable rounded corners, live-updating
@@ -115,7 +116,7 @@ Right-click the overlay (or the tray icon) → **Settings…**
 | **Appearance** | Opacity, corner radius, image fit, mirroring, pan X/Y, and **Match window to camera** for the selected overlay. |
 | **Position & size** | The four corner presets, width/height, and the corner margin. |
 | **Hotkeys** | Both accelerators, each with an **active** / **taken** badge showing whether it actually registered. |
-| **System** | Start with Windows, config editor, control port. |
+| **System** | Start with Windows, config editor, **Bring back on top**, re-assert interval, control port. |
 
 The Appearance and Position headers name the overlay they're editing, so it's
 always clear which window a slider is about. Hotkeys and System are global.
@@ -137,6 +138,30 @@ console window and without depending on `npm` or Node being on `PATH`. Untick it
 remove the entry; it also shows up in Task Manager's Startup tab.
 
 The path is absolute, so **re-tick it if you move the project folder**.
+
+## Staying on top
+
+Windows sometimes drops a window out of the topmost band and leaves it there —
+usually when another app takes exclusive fullscreen, a game most often. The overlay
+is then still visible but no longer floats above anything, and nothing puts it back.
+
+Two ways out, neither of which is restarting:
+
+- **Bring back on top** in Settings → System, or in the right-click and tray menus.
+  Immediate, and applies to every visible overlay
+- A watchdog that re-asserts it **every 5 seconds** on its own, so in practice it
+  recovers before you notice. Tune it with *Re-assert automatically*, or set
+  `keep_on_top_seconds` to `0` to turn it off
+
+Re-asserting means clearing always-on-top and setting it again, then raising the
+window — setting it again alone is a no-op, because Electron still believes the
+window is topmost when Windows has quietly decided otherwise.
+
+The Stream Deck and anything else on the control channel can trigger it too:
+
+```bash
+node -e "require('net').createConnection(28492,'127.0.0.1').end(JSON.stringify({cmd:'reassertTop'})+'\n')"
+```
 
 ## Saving, and the log
 
@@ -172,6 +197,7 @@ control port and the hotkeys.
     "toggle_maximize":   "CommandOrControl+Alt+M"
   },
   "corner_margin": 24,
+  "keep_on_top_seconds": 5,
   "editor": null,
   "control_port": 28492,
   "overlays": [
@@ -216,6 +242,8 @@ the running app creates or closes windows to match on save.
   through, so no empty space appears at the extremes
 - `corner_margin` — gap left between a window and the screen edge when snapping
   to a corner (global)
+- `keep_on_top_seconds` — how often to re-assert always-on-top; `0` disables the
+  watchdog (global). See [Staying on top](#staying-on-top)
 
 A pre-multi-overlay config, with `window` / `corner_radius` / `camera_id` at the
 top level, is migrated into `overlays[0]` automatically on first load.

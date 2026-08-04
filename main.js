@@ -134,6 +134,10 @@ const DEFAULT_CONFIG = {
   editor: null,
   // Loopback port external controllers talk to. 0 disables the control server.
   control_port: 28492,
+  // How often to re-assert always-on-top, in seconds. 0 turns the watchdog off.
+  // Windows drops a window out of the topmost band when something else takes
+  // exclusive fullscreen — a game, usually — and nothing puts it back.
+  keep_on_top_seconds: 5,
   overlays: [defaultOverlay('main', 'Main')]
 };
 
@@ -605,9 +609,48 @@ function saveVisibility(ov) {
   saveConfig();
 }
 
+/**
+ * Puts a window back in the topmost band. Windows silently drops WS_EX_TOPMOST
+ * when another app goes exclusive fullscreen, and Electron still reports
+ * isAlwaysOnTop() as true afterwards — so there is nothing to test, the flag has
+ * to be cleared and set again to force it to be re-applied.
+ */
+function reassertOnTop(ov) {
+  if (!ov.win || ov.win.isDestroyed() || !ov.win.isVisible()) return;
+  try {
+    ov.win.setAlwaysOnTop(false);
+    ov.win.setAlwaysOnTop(true, 'floating');
+    ov.win.moveTop();
+  } catch (_) {}
+}
+
+function reassertAllOnTop() {
+  for (const ov of liveOverlays()) reassertOnTop(ov);
+  // The settings window is also alwaysOnTop; without this the overlays would
+  // climb above the panel you are editing them in.
+  if (settingsWin && !settingsWin.isDestroyed() && settingsWin.isVisible()) {
+    try { settingsWin.moveTop(); } catch (_) {}
+  }
+}
+
+let topWatchdog = null;
+
+function startTopWatchdog() {
+  clearInterval(topWatchdog);
+  topWatchdog = null;
+  const secs = Number(cfg.keep_on_top_seconds);
+  if (!Number.isFinite(secs) || secs <= 0) {
+    log('keep-on-top watchdog disabled');
+    return;
+  }
+  topWatchdog = setInterval(reassertAllOnTop, Math.max(1, secs) * 1000);
+  log(`keep-on-top watchdog every ${Math.max(1, secs)}s`);
+}
+
 function showWindow(ov) {
   ov.win.show();
   ov.win.focus();
+  reassertOnTop(ov);
   applyVisible(ov);
   saveVisibility(ov);
   broadcastState();
@@ -893,6 +936,7 @@ function handleControlCommand(msg) {
     case 'getState':     broadcastState(); return;
     case 'setStartup':   setStartWithWindows(msg.enabled); broadcastState(); return;
     case 'openSettings': openSettings();   return;
+    case 'reassertTop':  reassertAllOnTop(); log('re-asserted always-on-top'); return;
     case 'addOverlay':   addOverlay();     return;
     case 'removeOverlay': removeOverlay(String(msg.overlay || '')); return;
     case 'quit':         app.quit();       return;
@@ -1086,6 +1130,12 @@ function applySettings(patch) {
     cfg.control_port = Math.round(clamp(patch.control_port, 0, 65535));
     saveConfig();
   }
+  if ('keep_on_top_seconds' in patch) {
+    cfg.keep_on_top_seconds = Math.round(clamp(patch.keep_on_top_seconds, 0, 3600));
+    saveConfig();
+    startTopWatchdog();
+  }
+  if (patch.reassertTop) reassertAllOnTop();
   if ('hotkeys' in patch) {
     cfg.hotkeys = { ...cfg.hotkeys, ...patch.hotkeys };
     saveConfig();
@@ -1250,6 +1300,7 @@ function buildWindowMenu(ov) {
     { label: `Hotkeys:  ${hkMax} = maximize / window`, enabled: false },
     { label: `          ${hkVis} = show / hide (all)`, enabled: false },
     { type: 'separator' },
+    { label: 'Bring back on top', click: reassertAllOnTop },
     { label: 'Settings…', click: openSettings },
     { type: 'separator' },
     {
@@ -1280,6 +1331,7 @@ function buildTrayMenu() {
 
   items.push(
     { type: 'separator' },
+    { label: 'Bring back on top', click: reassertAllOnTop },
     { label: 'Add another overlay', click: () => addOverlay() },
     { label: 'Settings…', click: openSettings },
     { type: 'separator' },
@@ -1496,6 +1548,7 @@ if (!app.requestSingleInstanceLock()) {
     log(`Webcam Overlay running — ${cfg.overlays.length} overlay(s)`);
     registerHotkeys();
     watchConfig();
+    startTopWatchdog();
 
     if (cfg.control_port) {
       control = startControlServer({

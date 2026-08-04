@@ -25,32 +25,72 @@ const STAGING  = path.join(ROOT, 'build', 'staging');
 
 function log(...a) { console.log(' ', ...a); }
 
-/** The running copy holds its own files open, so it has to go first. */
-function stopRunning() {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function isRunning() {
   try {
-    execFileSync('taskkill', ['/IM', EXE_NAME, '/F'], {
+    const out = execFileSync('tasklist', ['/FI', `IMAGENAME eq ${EXE_NAME}`], {
+      stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true
+    }).toString();
+    return out.includes(EXE_NAME);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * The running copy holds its own files open, so it has to go first — and it has
+ * to be *gone*, not merely signalled. A fixed sleep wasn't enough: the copy then
+ * failed with a sharing violation because Windows hadn't released the handles.
+ */
+async function stopRunning() {
+  if (!isRunning()) {
+    log(`${EXE_NAME} was not running`);
+    return;
+  }
+  try {
+    execFileSync('taskkill', ['/IM', EXE_NAME, '/F', '/T'], {
       stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true
     });
-    log(`stopped ${EXE_NAME}`);
-  } catch (_) {
-    log(`${EXE_NAME} was not running`);
+  } catch (_) {}
+
+  for (let i = 0; i < 30; i++) {
+    await sleep(500);
+    if (!isRunning()) {
+      log(`stopped ${EXE_NAME} after ${((i + 1) * 0.5).toFixed(1)}s`);
+      await sleep(1000);          // let the file handles drop too
+      return;
+    }
+  }
+  throw new Error(`${EXE_NAME} would not exit; nothing was replaced`);
+}
+
+/** Windows can still hold a handle briefly after exit, so don't give up at once. */
+async function copyWithRetry(from, to, attempts = 6) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      fs.cpSync(from, to, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      if (i === attempts) throw e;
+      log(`copy blocked (${e.code}), retrying ${i}/${attempts - 1}`);
+      await sleep(2000);
+    }
   }
 }
 
 (async () => {
   log(`installing to ${INSTALL_DIR}`);
 
-  stopRunning();
-  // Give Windows a moment to release the handles; copying over a just-killed
-  // process's files otherwise fails intermittently with EBUSY.
-  await new Promise((r) => setTimeout(r, 2500));
-
+  // Build first, so a broken build fails before the running app is disturbed.
   // Staged rather than built straight into place: a failed build should not be
   // able to leave a half-replaced install behind.
   const built = await build(STAGING);
 
+  await stopRunning();
+
   fs.mkdirSync(INSTALL_DIR, { recursive: true });
-  fs.cpSync(built, INSTALL_DIR, { recursive: true, force: true });
+  await copyWithRetry(built, INSTALL_DIR);
 
   const exe = path.join(INSTALL_DIR, EXE_NAME);
   if (!fs.existsSync(exe)) {

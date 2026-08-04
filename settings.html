@@ -269,6 +269,21 @@
       <input type="text" id="editor" placeholder="auto-detect" spellcheck="false">
     </div>
     <div class="row">
+      <label class="name">
+        Always on top
+        <span class="sub">Windows drops overlays out of the topmost band when another
+          app takes exclusive fullscreen. This puts them back.</span>
+      </label>
+      <button id="reassert">Bring back on top</button>
+    </div>
+    <div class="row">
+      <label class="name" for="keepTop">
+        Re-assert automatically
+        <span class="sub" id="keepTopNote"></span>
+      </label>
+      <input type="number" id="keepTop" min="0" max="3600" step="1">
+    </div>
+    <div class="row">
       <label class="name" for="port">
         Control port
         <span class="sub">Used by the Stream Deck plugin — needs a restart</span>
@@ -442,6 +457,12 @@
     $('startup').checked = !!s.startup;
     $('editor').value = c.editor || '';
     $('editorNote').textContent = 'Blank auto-detects — currently ' + (s.editor || 'Notepad');
+    const keepTop = c.keep_on_top_seconds ?? 0;
+    $('keepTop').value = keepTop;
+    $('keepTopNote').textContent = keepTop > 0
+      ? `Every ${keepTop}s, so it recovers on its own. 0 turns this off.`
+      : 'Off — use the button above when it happens. Set a number of seconds to automate it.';
+
     $('port').value = c.control_port ?? 0;
     $('configPath').textContent = s.configPath;
 
@@ -527,7 +548,10 @@
   onCommit($('width'),  (v) => ({ width:  Number(v) }),  true);
   onCommit($('height'), (v) => ({ height: Number(v) }),  true);
   onCommit($('margin'), (v) => ({ corner_margin: Number(v) }));
-  onCommit($('port'),   (v) => ({ control_port: Number(v) }));
+  onCommit($('port'),    (v) => ({ control_port: Number(v) }));
+  onCommit($('keepTop'), (v) => ({ keep_on_top_seconds: Number(v) }));
+
+  $('reassert').addEventListener('click', () => apply({ reassertTop: true }));
   onCommit($('editor'), (v) => ({ editor: v.trim() || null }));
   onCommit($('hkShow'), (v) => ({ hotkeys: { toggle_visibility: v.trim() } }));
   onCommit($('hkMax'),  (v) => ({ hotkeys: { toggle_maximize:   v.trim() } }));
