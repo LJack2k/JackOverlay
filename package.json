@@ -10,7 +10,8 @@
     "start": "electron .",
     "icon": "pwsh -NoProfile -File tools/make-appicon.ps1",
     "package": "npm run icon && node tools/package.js",
-    "package:only": "node tools/package.js"
+    "package:only": "node tools/package.js",
+    "deploy": "npm run icon && node tools/deploy.js"
   },
   "devDependencies": {
     "@electron/packager": "^20.1.1",

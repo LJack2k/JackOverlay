@@ -36,40 +36,54 @@ npm start
 
 `config.json` is created automatically on first run.
 
-## Building an exe
+## The installed app, and updating it
+
+The app that actually runs — including at Windows login — is a packaged exe
+installed at **`D:\Apps\JackOverlay\JackOverlay.exe`**, independent of this source
+tree. Editing the source changes nothing until you deploy.
+
+To rebuild and replace it:
+
+```bash
+npm run deploy
+```
+
+That regenerates the icon, packages, stops the running copy, replaces the install
+and restarts it. Settings are untouched — they live in `%APPDATA%\JackOverlay`, not
+in the program folder. Override the destination with `INSTALL_DIR` if needed.
+
+To build without installing:
 
 ```bash
 npm run package
 ```
 
-That regenerates the icon and produces a portable folder,
-`dist/JackOverlay-win32-x64/`, containing `JackOverlay.exe`. Copy the folder
-anywhere and run it — no installer, no admin rights.
+That leaves a portable folder at `dist/JackOverlay-win32-x64/`. Copy it anywhere and
+run it — no installer, no admin rights.
 
-It uses [`@electron/packager`](https://github.com/electron/packager) rather than
-electron-builder deliberately: it reuses the Electron build already in the local
-cache and downloads nothing else — no NSIS, no signing tools. The downside is a
+### Notes
+
+Packaging uses [`@electron/packager`](https://github.com/electron/packager) rather
+than electron-builder deliberately: it reuses the Electron build already in the
+local cache and downloads nothing else — no NSIS, no signing tools. The trade is a
 folder rather than a single-file installer.
 
-Run from source, settings live next to `main.js`. **Packaged, they move to
-`%APPDATA%\JackOverlay`**, because a packaged app's own directory is inside a
-read-only `app.asar`. To carry your setup across, copy `config.json` there.
+Run from source (`npm start`), settings live next to `main.js`; packaged they move
+to `%APPDATA%\JackOverlay`, because a packaged app's own directory is inside a
+read-only `app.asar`. The two builds therefore keep separate settings, and only one
+can run at a time — they share the control port and the single-instance lock.
 
-Two things to know when you switch to the exe:
+Chromium salts camera device ids per profile, so ids in a config copied between the
+two builds won't match. The app re-finds each camera by its stored label and
+rewrites the id, logging it when it does. If a camera can't be matched by label
+either, pick it again in Settings.
 
-- **Re-tick Start with Windows.** The startup entry records an absolute path, and
-  the exe's differs from `electron.exe` plus the project folder.
-- Chromium salts camera device ids per profile, so the ids in a config copied from
-  the source build won't match. The app re-finds each camera by its stored label
-  and rewrites the id, which it logs — but if a camera can't be matched, pick it
-  again in Settings.
-
-If Windows is holding a handle on a previous build's `app.asar` (antivirus does
-this occasionally, with no process visibly owning it) the build fails to overwrite.
-Either retry later or send it elsewhere:
+If Windows is holding a handle on a previous build's `app.asar` — antivirus does
+this occasionally, with no process visibly owning it — the build can't overwrite it.
+Retry later, or send the output elsewhere:
 
 ```bash
-PACKAGE_OUT=build/app npm run package
+PACKAGE_OUT=build/tmp npm run package
 ```
 
 ## Controls

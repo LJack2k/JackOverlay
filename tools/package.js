@@ -30,10 +30,10 @@ if (!fs.existsSync(ICON)) {
   process.exit(1);
 }
 
-(async () => {
+async function build(out = OUT) {
   const paths = await packager({
     dir: ROOT,
-    out: OUT,
+    out,
     name: pkg.productName,
     platform: 'win32',
     arch: 'x64',
@@ -73,7 +73,15 @@ if (!fs.existsSync(ICON)) {
     console.log(`packaged: ${p}`);
     console.log(`exe:      ${exe}  (${fs.existsSync(exe) ? 'present' : 'MISSING'})`);
   }
-})().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+  return paths[0];
+}
+
+module.exports = { build, OUT, ICON };
+
+// Only build when run directly, so tools/deploy.js can reuse build().
+if (require.main === module) {
+  build().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
